@@ -3,3 +3,7 @@ __pycache__/
 .pytest_cache/
 .venv/
 build/
+
+# Local planning (OpenSpec) and its generated Claude skills/commands
+openspec/
+.claude/
