@@ -1,4 +1,4 @@
-"""`ecobee watch`: keep the state cache fresh for the bar widget.
+"""`thermoslop watch`: keep the state cache fresh for the bar widget.
 
 Subscribes to HomeKit events so changes show up instantly, and polls every
 `poll_interval` seconds in case an event was missed. Reconnects (and
@@ -12,8 +12,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from ecobee.config import PAIRING_FILE
-from ecobee.homekit import Home, read_cache, thermostat_state, unavailable_state, write_cache
+from thermoslop.config import PAIRING_FILE
+from thermoslop.homekit import Home, read_cache, thermostat_state, unavailable_state, write_cache
 
 log = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ async def _pairings_changed() -> None:
 async def watch(home: Home) -> None:
     aliases = home.aliases()
     if not aliases:
-        log.warning("no thermostats paired yet; waiting for `ecobee pair`")
+        log.warning("no thermostats paired yet; waiting for `thermoslop pair`")
     watchers = [asyncio.create_task(_watch_one(home, alias)) for alias in aliases]
     try:
         await _pairings_changed()

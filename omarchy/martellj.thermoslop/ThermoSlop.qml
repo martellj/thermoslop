@@ -1,5 +1,5 @@
-// ecobee thermostats in the bar. State comes from the cache file that
-// `ecobee watch` keeps fresh (it subscribes to HomeKit events), so the widget
+// ThermoSlop: thermostats in the bar. State comes from the cache file that
+// `thermoslop watch` keeps fresh (it subscribes to HomeKit events), so the widget
 // never polls the thermostats itself.
 //
 //   left click    notification with full status (all thermostats + sensors)
@@ -19,12 +19,12 @@ import qs.Commons
 
 BarWidget {
   id: root
-  moduleName: "john.ecobee"
+  moduleName: "martellj.thermoslop"
 
-  readonly property string stateFile: Quickshell.env("HOME") + "/.cache/ecobee/state.json"
+  readonly property string stateFile: Quickshell.env("HOME") + "/.cache/thermoslop/state.json"
   readonly property string only: root.settings && root.settings.thermostat ? String(root.settings.thermostat) : ""
   readonly property string house: root.settings && root.settings.house ? String(root.settings.house) : ""
-  // A reading older than this means `ecobee watch` isn't running.
+  // A reading older than this means `thermoslop watch` isn't running.
   readonly property int staleSeconds: 600
 
   property var thermostats: []
@@ -74,7 +74,7 @@ BarWidget {
   }
 
   function tooltip() {
-    if (!shown.length) return "ecobee: no data (is `ecobee watch` running?)"
+    if (!shown.length) return "ThermoSlop: no data (is `thermoslop watch` running?)"
     const grouped = houses.length > 1
     return shown.map(function(t, i) {
       const heading = grouped && (i === 0 || shown[i - 1].house !== t.house)
@@ -93,8 +93,8 @@ BarWidget {
     return line
   }
 
-  function ecobee(args) {
-    if (root.bar) root.bar.run("ecobee " + args)
+  function thermoslop(args) {
+    if (root.bar) root.bar.run("thermoslop " + args)
   }
 
   FileView {
@@ -125,7 +125,7 @@ BarWidget {
     onTriggered: {
       if (root.pendingDelta && root.scrollTarget) {
         const d = root.pendingDelta
-        root.ecobee("set " + (d > 0 ? "+" : "") + d + " -t " + Util.shellQuote(root.scrollTarget))
+        root.thermoslop("set " + (d > 0 ? "+" : "") + d + " -t " + Util.shellQuote(root.scrollTarget))
       }
       root.pendingDelta = 0
     }
@@ -148,9 +148,9 @@ BarWidget {
     onPressed: function(b) {
       const all = root.only ? "-t " + Util.shellQuote(root.only)
         : root.house ? "--all --house " + Util.shellQuote(root.house) : "--all"
-      if (b === Qt.RightButton) root.ecobee((root.anyAway ? "resume " : "away ") + all)
-      else if (b === Qt.MiddleButton) root.ecobee("resume " + all)
-      else if (root.bar) root.bar.run("omarchy-notification-send -g 󰔏 Ecobee \"$(ecobee status 2>&1)\"")
+      if (b === Qt.RightButton) root.thermoslop((root.anyAway ? "resume " : "away ") + all)
+      else if (b === Qt.MiddleButton) root.thermoslop("resume " + all)
+      else if (root.bar) root.bar.run("omarchy-notification-send -g 󰔏 ThermoSlop \"$(thermoslop status 2>&1)\"")
     }
 
     onWheelMoved: function(delta) {

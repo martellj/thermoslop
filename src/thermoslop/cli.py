@@ -1,4 +1,4 @@
-"""ecobee: command line for ecobee thermostats over local HomeKit.
+"""thermoslop: command line for ecobee thermostats over local HomeKit (unofficial).
 
 Every command takes --json for machine-readable output (scripts, AI tools).
 """
@@ -11,12 +11,12 @@ import json
 import logging
 import sys
 
-from ecobee import discovery, ops
-from ecobee.config import CONFIG_FILE, load_config
-from ecobee.homekit import (
+from thermoslop import APP, discovery, ops
+from thermoslop.config import CONFIG_FILE, load_config, migrate_legacy
+from thermoslop.homekit import (
     COMFORT,
     HVAC_MODES,
-    EcobeeError,
+    ThermoSlopError,
     Home,
     slugify,
     write_cache,
@@ -103,10 +103,10 @@ async def cmd_pair(args, config) -> int:
     want = args.device.lower()
     matches = [d for d in devices if want in (d.id, d.address) or slugify(d.name) == slugify(args.device)]
     if not matches:
-        raise EcobeeError(f"no device named {args.device!r} found; run `ecobee discover`")
+        raise ThermoSlopError(f"no device named {args.device!r} found; run `thermoslop discover`")
     device = matches[0]
     if device.paired:
-        raise EcobeeError(
+        raise ThermoSlopError(
             f"{device.name} is already paired with another controller (Apple Home?). Remove it there first."
         )
     async def get_pin() -> str:
@@ -148,7 +148,7 @@ def _parse_temp(text: str) -> tuple[float, bool]:
     try:
         return float(text), text[0] in "+-"
     except ValueError:
-        raise EcobeeError(f"not a temperature: {text!r}") from None
+        raise ThermoSlopError(f"not a temperature: {text!r}") from None
 
 
 async def cmd_set(args, config) -> int:
@@ -183,7 +183,7 @@ async def cmd_resume(args, config) -> int:
 
 
 async def cmd_watch(args, config) -> int:
-    from ecobee.daemon import watch
+    from thermoslop.daemon import watch
 
     async with Home(config) as home:
         await watch(home)
@@ -191,7 +191,7 @@ async def cmd_watch(args, config) -> int:
 
 
 async def cmd_mcp(args, config) -> int:
-    from ecobee import mcp_server
+    from thermoslop import mcp_server
 
     if args.http:
         await mcp_server.serve_http(config, read_only=args.read_only, bind=args.bind, port=args.port)
@@ -218,7 +218,7 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--house", help="only thermostats in this house (from [houses] in config)")
     common.add_argument("-v", "--verbose", action="count", default=0)
 
-    p = argparse.ArgumentParser(prog="ecobee", description=__doc__, parents=[common])
+    p = argparse.ArgumentParser(prog=APP, description=__doc__, parents=[common])
     sub = p.add_subparsers(dest="command", required=True)
 
     s = sub.add_parser("status", parents=[common], help="current temperature, setpoints, sensors")
@@ -251,7 +251,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_discover)
 
     s = sub.add_parser("pair", parents=[common], help="pair with a thermostat using its HomeKit code")
-    s.add_argument("device", help="name, IP, or device id from `ecobee discover`")
+    s.add_argument("device", help="name, IP, or device id from `thermoslop discover`")
     s.add_argument("--pin", help="HomeKit code XXX-XX-XXX (prompted if omitted)")
     s.add_argument("--alias", help="short name to use (default: slug of the device name)")
     s.add_argument("--subnet", action="append")
@@ -279,18 +279,19 @@ def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     level = logging.DEBUG if args.verbose > 1 else logging.INFO if args.verbose or args.command == "watch" else logging.WARNING
     logging.basicConfig(level=level, format="%(levelname)s %(name)s: %(message)s")
+    migrate_legacy()
     try:
         config = load_config()
     except ValueError as e:
-        print(f"ecobee: {CONFIG_FILE}: {e}", file=sys.stderr)
+        print(f"{APP}: {CONFIG_FILE}: {e}", file=sys.stderr)
         sys.exit(1)
     try:
         code = asyncio.run(args.func(args, config))
-    except EcobeeError as e:
+    except ThermoSlopError as e:
         if args.json:
             print(json.dumps({"error": str(e)}))
         else:
-            print(f"ecobee: {e}", file=sys.stderr)
+            print(f"{APP}: {e}", file=sys.stderr)
         code = 1
     except KeyboardInterrupt:
         code = 130

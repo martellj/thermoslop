@@ -2,8 +2,8 @@ import asyncio
 
 import pytest
 
-from ecobee.homekit import EcobeeError
-from ecobee.tailnet import TailnetAuth, check_bind, is_allowed
+from thermoslop.homekit import ThermoSlopError
+from thermoslop.tailnet import TailnetAuth, check_bind, is_allowed
 
 ME = {"login": "alice@example.com", "node": "alices-laptop", "fqdn": "alices-laptop.tailnet-name.ts.net"}
 GUEST = {"login": "guest@example.com", "node": "guest-phone", "fqdn": "guest-phone.tailnet-name.ts.net"}
@@ -13,7 +13,7 @@ def test_check_bind():
     check_bind("100.100.100.100")
     check_bind("fd7a:115c:a1e0::1")
     for bad in ("0.0.0.0", "::", "192.168.1.5", "127.0.0.1", "omarchy"):
-        with pytest.raises(EcobeeError):
+        with pytest.raises(ThermoSlopError):
             check_bind(bad)
 
 

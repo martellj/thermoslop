@@ -1,11 +1,13 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ecobee-hk"
+name = "thermoslop"
 version = "0.1.0"
-description = "Local (HomeKit) CLI and Omarchy bar widget for ecobee thermostats"
+description = "Unofficial local HomeKit control for ecobee thermostats: CLI, MCP server, Omarchy bar widget"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = ["aiohomekit>=3.2", "mcp>=2.3,<3"]
 
@@ -13,7 +15,7 @@ dependencies = ["aiohomekit>=3.2", "mcp>=2.3,<3"]
 test = ["pytest"]
 
 [project.scripts]
-ecobee = "ecobee.cli:main"
+thermoslop = "thermoslop.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

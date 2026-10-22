@@ -2,9 +2,9 @@ import json
 
 import pytest
 
-from ecobee.config import McpConfig
-from ecobee.guard import Guard, Refused
-from ecobee.homekit import EcobeeError, plan_setpoints
+from thermoslop.config import McpConfig
+from thermoslop.guard import Guard, Refused
+from thermoslop.homekit import ThermoSlopError, plan_setpoints
 
 
 class Clock:
@@ -56,7 +56,7 @@ def test_limits_in_celsius(tmp_path):
 
 
 def test_heat_cool_planning_errors_pass_through():
-    with pytest.raises(EcobeeError, match="auto mode"):
+    with pytest.raises(ThermoSlopError, match="auto mode"):
         plan_setpoints(_state(mode="auto"), 70)
 
 
@@ -114,9 +114,9 @@ def test_audit_line(tmp_path):
 
 
 def test_audit_rotation(tmp_path, monkeypatch):
-    import ecobee.guard
+    import thermoslop.guard
 
-    monkeypatch.setattr(ecobee.guard, "ROTATE_BYTES", 100)
+    monkeypatch.setattr(thermoslop.guard, "ROTATE_BYTES", 100)
     path = tmp_path / "a.jsonl"
     guard = Guard(McpConfig(), path, Clock())
     for _ in range(3):

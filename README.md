@@ -1,11 +1,22 @@
-# ecobee
+# ThermoSlop
 
-Local control of ecobee thermostats over HomeKit: a CLI (`ecobee`) for the
-terminal, scripts and AI tools, plus an Omarchy bar widget. No cloud and no
-ecobee developer key. It works while the internet is down.
+Your thermostats in the terminal, the status bar, and your AI agents' hands.
+ThermoSlop controls ecobee thermostats locally over HomeKit:
+
+- `thermoslop`, a CLI for the terminal, scripts and AI tools
+- an MCP server, with guardrails
+- an Omarchy bar widget
+
+No cloud and no ecobee developer key, and it works while the internet is down.
+
+> **Unofficial.** ThermoSlop is an independent project. It is not affiliated
+> with, endorsed by, or supported by ecobee Inc. or Apple Inc. "ecobee" and
+> "HomeKit" are trademarks of their respective owners, and are used here only
+> to say what this works with. It talks to your thermostat over the local
+> HomeKit protocol. Use it at your own risk (see [LICENSE](LICENSE)).
 
 ```
-$ ecobee status
+$ thermoslop status
 Main Floor: 69.8°F · ▲ heating · set 68°F (heat) · home · 42% RH
     Bedroom: 67.1°F, occupied
 Upstairs: 71.2°F · idle · set 67°F–75°F (auto) · home · 40% RH
@@ -14,18 +25,23 @@ Upstairs: 71.2°F · idle · set 67°F–75°F (auto) · home · 40% RH
 ## Install
 
 ```bash
-./install.sh          # venv + ~/.local/bin/ecobee + ecobee-watch.service + bar widget
-ecobee discover       # lists thermostats and whether they're ready to pair
-ecobee pair "Main Floor"   # asks for the HomeKit code shown on the thermostat
-ecobee pair Upstairs
+./install.sh                  # venv, ~/.local/bin/thermoslop, services, bar widget
+thermoslop discover           # lists thermostats and whether they're ready to pair
+thermoslop pair "Main Floor"  # asks for the HomeKit code shown on the thermostat
+thermoslop pair Upstairs
 ```
 
 The HomeKit code is on the thermostat under **Menu → Settings → HomeKit**
 (the exact menu path varies with firmware). ecobee shows a **new code once
-pairing starts**, so `ecobee pair` starts first and then asks for the code
+pairing starts**, so `thermoslop pair` starts first and then asks for the code
 on the screen at that moment; a code read beforehand is rejected. An ecobee pairs with **one**
 HomeKit controller, so it has to be removed from Apple Home before pairing
 here, and pairing it back to Apple Home takes it away from this box.
+
+Upgrading from before the rename (when the project was called `ecobee`):
+rerun `./install.sh`. It moves the config, pairings, cache and audit log to
+the `thermoslop` locations, swaps the services, and renames the bar entry in
+place, so nothing has to be paired again.
 
 The watcher service restarts on its own when `pairing.json` changes, so
 newly paired thermostats show up in the bar without a manual restart.
@@ -37,31 +53,31 @@ All of them take `--json` (machine-readable; errors come back as
 
 | Command | What it does |
 |---|---|
-| `ecobee status [--live]` | Temperature, humidity, mode, setpoints, comfort setting, sensors. Uses the watcher's cache when fresh; `--live` asks the thermostat. |
-| `ecobee set 70` / `set +1` / `set -2` | Target temperature in heat/cool mode. Relative changes also shift both setpoints in auto mode. |
-| `ecobee set --heat 68 --cool 75` | Auto-mode setpoints. |
-| `ecobee mode heat\|cool\|auto\|off` | HVAC mode. |
-| `ecobee home\|away\|sleep [--all]` | Hold a comfort setting. |
-| `ecobee resume [--all]` | Clear holds and go back to the schedule. |
-| `ecobee discover [--all]` | Find HomeKit thermostats (or every HomeKit accessory with `--all`). |
-| `ecobee pair NAME`, `ecobee unpair -t NAME` | Manage pairings. |
-| `ecobee watch` | The daemon behind the widget (run by `ecobee-watch.service`). |
-| `ecobee mcp [--read-only]` | MCP server for AI clients (see below). |
-| `ecobee dump -t NAME` | Raw HomeKit accessory data, for debugging. |
+| `thermoslop status [--live]` | Temperature, humidity, mode, setpoints, comfort setting, sensors. Uses the watcher's cache when fresh; `--live` asks the thermostat. |
+| `thermoslop set 70` / `set +1` / `set -2` | Target temperature in heat/cool mode. Relative changes also shift both setpoints in auto mode. |
+| `thermoslop set --heat 68 --cool 75` | Auto-mode setpoints. |
+| `thermoslop mode heat\|cool\|auto\|off` | HVAC mode. |
+| `thermoslop home\|away\|sleep [--all]` | Hold a comfort setting. |
+| `thermoslop resume [--all]` | Clear holds and go back to the schedule. |
+| `thermoslop discover [--all]` | Find HomeKit thermostats (or every HomeKit accessory with `--all`). |
+| `thermoslop pair NAME`, `thermoslop unpair -t NAME` | Manage pairings. |
+| `thermoslop watch` | The daemon behind the widget (run by `thermoslop-watch.service`). |
+| `thermoslop mcp [--read-only]` | MCP server for AI clients (see below). |
+| `thermoslop dump -t NAME` | Raw HomeKit accessory data, for debugging. |
 
 When more than one thermostat is paired, commands that change something need
 `-t`, `--all`, or `default = "alias"` in the config.
 
 Writing a setpoint creates a hold, just like changing it on the thermostat.
-`ecobee resume` clears it.
+`thermoslop resume` clears it.
 
 ## MCP server for AI clients
 
-`ecobee mcp` serves the thermostats as MCP tools over stdio:
+`thermoslop mcp` serves the thermostats as MCP tools over stdio:
 
 | Tool | Does |
 |---|---|
-| `list_thermostats`, `get_status` | Read-only. Same JSON as `ecobee status --json`. |
+| `list_thermostats`, `get_status` | Read-only. Same JSON as `thermoslop status --json`. |
 | `set_temperature` | Absolute setpoint (`target`, or `heat`/`cool` in auto mode). |
 | `adjust_temperature` | Relative change, −5 to +5. |
 | `set_mode` | heat / cool / auto (off only if allowed). |
@@ -72,18 +88,18 @@ Pairing isn't exposed. Each tool takes `thermostat` (alias or prefix) and/or `ho
 **Claude Code:**
 
 ```bash
-claude mcp add --scope user ecobee -- ~/.local/bin/ecobee mcp
+claude mcp add --scope user thermoslop -- ~/.local/bin/thermoslop mcp
 ```
 
 **Claude Desktop**, or any client that takes a JSON config:
 
 ```json
-{ "mcpServers": { "ecobee": { "command": "/home/you/.local/bin/ecobee", "args": ["mcp"] } } }
+{ "mcpServers": { "thermoslop": { "command": "/home/you/.local/bin/thermoslop", "args": ["mcp"] } } }
 ```
 
 ### Other machines on your tailnet
 
-`ecobee mcp --http` serves streamable HTTP for MCP clients on other machines
+`thermoslop mcp --http` serves streamable HTTP for MCP clients on other machines
 (a Mac, a laptop). Nothing is reachable from the LAN or the internet:
 
 - It listens only on this machine's Tailscale addresses, and refuses
@@ -97,7 +113,7 @@ claude mcp add --scope user ecobee -- ~/.local/bin/ecobee mcp
   domain to this address.
 
 ```bash
-systemctl --user enable --now ecobee-mcp    # installed by install.sh, off by default
+systemctl --user enable --now thermoslop-mcp    # installed by install.sh, off by default
 ```
 
 ```toml
@@ -110,7 +126,7 @@ On the other machine, point the client at `http://<node>:8765/mcp`, where
 `<node>` is this machine's MagicDNS name:
 
 ```bash
-claude mcp add --scope user --transport http ecobee http://omarchy:8765/mcp
+claude mcp add --scope user --transport http thermoslop http://omarchy:8765/mcp
 ```
 
 The audit log records these callers as `login on node`.
@@ -122,7 +138,7 @@ config:
 
 ```toml
 [mcp]
-read_only = false            # true (or `ecobee mcp --read-only`) offers only the read tools
+read_only = false            # true (or `thermoslop mcp --read-only`) offers only the read tools
 min_setpoint = "55F"         # setpoints outside this range are refused ("13C" works too)
 max_setpoint = "80F"
 allow_off = false            # set_mode off is refused unless true
@@ -131,7 +147,7 @@ max_changes_per_hour = 20    # each thermostat changed counts once; survives res
 
 Refusals come back as tool errors that explain why, so the agent can tell you
 instead of retrying. Every attempted change is appended to
-`~/.local/state/ecobee/changes.jsonl` with the time, tool, arguments, caller,
+`~/.local/state/thermoslop/changes.jsonl` with the time, tool, arguments, caller,
 outcome, and the thermostat's mode and setpoints before and after. That
 includes refusals and failures.
 
@@ -139,7 +155,7 @@ Comfort changes are verified by reading the thermostat back. An ecobee3 lite
 (firmware 4.8.70240) does apply away, home and resume, but takes 2–4 s to
 report them. Writes wait up to 8 s for the thermostat to report the change.
 
-## Bar widget (`omarchy/john.ecobee`)
+## Bar widget (`omarchy/martellj.thermoslop`)
 
 Shows an icon (flame while heating, snowflake while cooling, away icon when
 every thermostat is away) and each thermostat's temperature. Hover for details.
@@ -149,7 +165,7 @@ every thermostat is away) and each thermostat's temperature. Hover for details.
 - **middle click**: resume the schedule
 - **scroll**: setpoint ±1° on the first thermostat, sent once scrolling stops
 
-It reads `~/.cache/ecobee/state.json`, which `ecobee watch` keeps current with
+It reads `~/.cache/thermoslop/state.json`, which `thermoslop watch` keeps current with
 HomeKit event subscriptions. It never polls the thermostats itself, and dims
 when the data is more than 10 minutes old.
 
@@ -161,7 +177,7 @@ The plugin directory is symlinked into `~/.config/omarchy/plugins/`, and the
 shell doesn't hot-reload through that symlink. After editing the QML, run
 `omarchy-shell shell rescanPlugins`.
 
-## Configuration: `~/.config/ecobee/config.toml`
+## Configuration: `~/.config/thermoslop/config.toml`
 
 ```toml
 subnets = ["192.168.1.0/24"]  # unicast discovery fallback (see below)
@@ -181,8 +197,8 @@ can run every house as long as it can route to each house's LAN. Here that's
 Tailscale, with each house's OpenWrt router advertising its LAN as a subnet
 route, and `tailscale set --accept-routes` on this machine.
 
-- `ecobee status` groups thermostats under a heading per house.
-- `--house cabin` limits any command to one house; `ecobee away --house cabin`
+- `thermoslop status` groups thermostats under a heading per house.
+- `--house cabin` limits any command to one house; `thermoslop away --house cabin`
   holds away on all of them.
 - When a thermostat's name is already taken (two "Main Floor"s), `pair`
   prefixes the alias with its house: `cabin-main-floor`.
@@ -208,16 +224,16 @@ router makes this rarely needed.
 
 | Path | Contents |
 |---|---|
-| `~/.local/share/ecobee/pairing.json` | HomeKit pairing keys (mode 600; treat it like an SSH key) |
-| `~/.local/share/ecobee/charmap.json` | aiohomekit accessory cache |
-| `~/.local/state/ecobee/changes.jsonl` | Audit log of changes made through MCP |
-| `~/.cache/ecobee/state.json` | Latest state (each entry has its `house`), written atomically by the watcher and CLI |
+| `~/.local/share/thermoslop/pairing.json` | HomeKit pairing keys (mode 600; treat it like an SSH key) |
+| `~/.local/share/thermoslop/charmap.json` | aiohomekit accessory cache |
+| `~/.local/state/thermoslop/changes.jsonl` | Audit log of changes made through MCP |
+| `~/.cache/thermoslop/state.json` | Latest state (each entry has its `house`), written atomically by the watcher and CLI |
 
 ## Development
 
 ```bash
-~/.local/share/ecobee/venv/bin/pip install -e '.[test]'
-~/.local/share/ecobee/venv/bin/python -m pytest
+~/.local/share/thermoslop/venv/bin/pip install -e '.[test]'
+~/.local/share/thermoslop/venv/bin/python -m pytest
 ```
 
 Built on [aiohomekit](https://github.com/Jc2k/aiohomekit), the library behind

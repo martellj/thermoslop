@@ -6,11 +6,11 @@ import json
 import pytest
 from mcp.client.client import Client
 
-import ecobee.homekit
-from ecobee.config import Config, McpConfig
-from ecobee.guard import Guard
-from ecobee.homekit import Home, plan_setpoints
-from ecobee.mcp_server import ThermostatServer
+import thermoslop.homekit
+from thermoslop.config import Config, McpConfig
+from thermoslop.guard import Guard
+from thermoslop.homekit import Home, plan_setpoints
+from thermoslop.mcp_server import ThermostatServer
 
 HOUSES = {"home": ["192.168.1.0/24"], "cabin": ["192.168.2.0/24"]}
 
@@ -77,7 +77,7 @@ class FakeHome(Home):
 
 @pytest.fixture(autouse=True)
 def state_file(tmp_path, monkeypatch):
-    monkeypatch.setattr(ecobee.homekit, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(thermoslop.homekit, "STATE_FILE", tmp_path / "state.json")
 
 
 @pytest.fixture

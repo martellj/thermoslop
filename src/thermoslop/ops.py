@@ -1,7 +1,7 @@
 """Thermostat operations shared by the CLI and the MCP server.
 
 Each takes an open `Home` plus a selection (thermostat alias/prefix, house) and
-returns state dicts like `ecobee status --json`, raising `EcobeeError` for
+returns state dicts like `thermoslop status --json`, raising `ThermoSlopError` for
 anything the caller should report. Formatting and guardrails live in the
 callers.
 """
@@ -11,7 +11,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 
-from ecobee.homekit import EcobeeError, Home, read_cache, unavailable_state, write_cache
+from thermoslop.homekit import ThermoSlopError, Home, read_cache, unavailable_state, write_cache
 
 
 def _fresh_cache(aliases: list[str], max_age: float) -> list[dict] | None:
@@ -45,7 +45,7 @@ async def status(home: Home, thermostat: str | None = None, house: str | None = 
         for alias in aliases:
             try:
                 states.append(await home.state(alias))
-            except EcobeeError as e:
+            except ThermoSlopError as e:
                 states.append(unavailable_state(alias, str(e), house=home.house(alias)))
         write_cache([s for s in states if s["available"]])
     return states

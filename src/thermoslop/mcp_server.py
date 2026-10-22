@@ -1,7 +1,7 @@
-"""`ecobee mcp`: the thermostats as MCP tools for AI clients.
+"""`thermoslop mcp`: the thermostats as MCP tools for AI clients.
 
 stdio by default (the client launches it), or streamable HTTP on this
-machine's Tailscale addresses with `--http`. Reads behave like `ecobee status`.
+machine's Tailscale addresses with `--http`. Reads behave like `thermoslop status`.
 Every change goes through the guardrails in guard.py and lands in the audit log.
 """
 
@@ -17,9 +17,9 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import ToolAnnotations
 from pydantic import Field
 
-from ecobee import ops
-from ecobee.guard import Guard, Refused, snapshot
-from ecobee.homekit import COMFORT, EcobeeError, Home, read_cache
+from thermoslop import APP, ops
+from thermoslop.guard import Guard, Refused, snapshot
+from thermoslop.homekit import COMFORT, ThermoSlopError, Home, read_cache
 
 log = logging.getLogger(__name__)
 
@@ -50,7 +50,7 @@ class ThermostatServer:
         self.read_only = read_only
         self._locks: dict[str, asyncio.Lock] = {}
         self.units = home.config.units or self._cached_units()
-        self.mcp = MCPServer("ecobee", instructions=self._instructions())
+        self.mcp = MCPServer(APP, instructions=self._instructions())
         self._register()
 
     def _cached_units(self) -> str:
@@ -94,7 +94,7 @@ class ThermostatServer:
         except Refused as e:
             self.guard.record(tool, args, caller, "refused", aliases, error=str(e))
             raise ToolError(f"Refused: {e}") from None
-        except EcobeeError as e:
+        except ThermoSlopError as e:
             self.guard.record(tool, args, caller, "failed", aliases, error=str(e))
             raise ToolError(str(e)) from None
         states = result if isinstance(result, list) else [result]
@@ -107,8 +107,8 @@ class ThermostatServer:
         def pick() -> list[str]:
             try:
                 return self.home.pick(thermostat, house, single=single)
-            except EcobeeError as e:
-                raise EcobeeError(str(e).replace("with -t", "with the `thermostat` argument")) from None
+            except ThermoSlopError as e:
+                raise ThermoSlopError(str(e).replace("with -t", "with the `thermostat` argument")) from None
 
         return pick
 
@@ -134,7 +134,7 @@ class ThermostatServer:
             """List paired thermostats: alias, name, house, and whether the last reading succeeded."""
             try:
                 return ops.list_thermostats(home, house)
-            except EcobeeError as e:
+            except ThermoSlopError as e:
                 raise ToolError(str(e)) from None
 
         @mcp.tool(annotations=READ)
@@ -148,7 +148,7 @@ class ThermostatServer:
             With no arguments, covers every thermostat."""
             try:
                 return await ops.status(home, thermostat, house, live=live)
-            except EcobeeError as e:
+            except ThermoSlopError as e:
                 raise ToolError(str(e)) from None
 
         if self.read_only:
@@ -245,7 +245,7 @@ async def serve_http(config, read_only: bool, bind: str | None, port: int | None
     import uvicorn
     from mcp.server.transport_security import TransportSecuritySettings
 
-    from ecobee import tailnet
+    from thermoslop import tailnet
 
     addresses = [bind] if bind else await tailnet.tailscale_ips()
     for address in addresses:
@@ -254,7 +254,7 @@ async def serve_http(config, read_only: bool, bind: str | None, port: int | None
     me = await tailnet.whois(addresses[0])
     allow = config.mcp.allow or ([me["login"]] if me else [])
     if not allow:
-        raise EcobeeError("can't tell who owns this node; set `allow` under [mcp]")
+        raise ThermoSlopError("can't tell who owns this node; set `allow` under [mcp]")
     # Only requests addressed to this node's tailnet names, so a web page can't
     # reach the server by rebinding its own domain to this address.
     hosts = [tailnet.host_header(a, port) for a in addresses]

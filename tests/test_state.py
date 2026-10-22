@@ -2,9 +2,9 @@ from aiohomekit.model import Accessories, Accessory
 from aiohomekit.model.characteristics import CharacteristicsTypes as CT
 from aiohomekit.model.services import ServicesTypes as ST
 
-from ecobee.cli import _parse_temp, format_state
-from ecobee.discovery import _parse_txt
-from ecobee.homekit import slugify, thermostat_state, to_c
+from thermoslop.cli import _parse_temp, format_state
+from thermoslop.discovery import _parse_txt
+from thermoslop.homekit import slugify, thermostat_state, to_c
 
 
 def _ecobee(mode=1, action=1, comfort=0, units=1) -> Accessories:
@@ -84,7 +84,7 @@ def test_manual_hold():
 
 
 def test_house_of():
-    from ecobee.config import Config
+    from thermoslop.config import Config
 
     config = Config(houses={"home": ["192.168.1.0/24"], "cabin": ["192.168.2.0/24"]})
     assert config.house_of("192.168.2.31") == "cabin"
@@ -93,7 +93,7 @@ def test_house_of():
 
 
 def test_status_groups_by_house():
-    from ecobee.cli import format_states
+    from thermoslop.cli import format_states
 
     home = thermostat_state("main-floor", _ecobee(), house="home")
     cabin = thermostat_state("cabin-main-floor", _ecobee(), house="cabin")

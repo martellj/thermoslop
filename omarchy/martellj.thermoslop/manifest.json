@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "martellj.thermoslop",
+  "name": "ThermoSlop",
+  "version": "0.1.0",
+  "author": "John Martell",
+  "description": "Unofficial: thermostat temperatures in the bar over local HomeKit (works with ecobee). Not affiliated with ecobee Inc. or Apple Inc.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "ThermoSlop.qml"
+  },
+  "barWidget": {
+    "displayName": "ThermoSlop",
+    "description": "Thermostat temperatures; scroll adjusts the setpoint, right click toggles away",
+    "category": "Info",
+    "allowMultiple": true
+  }
+}

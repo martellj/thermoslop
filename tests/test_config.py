@@ -1,6 +1,6 @@
 import pytest
 
-from ecobee.config import McpConfig, degrees_in, load_config, parse_degrees
+from thermoslop.config import McpConfig, degrees_in, load_config, parse_degrees
 
 
 def test_parse_degrees():

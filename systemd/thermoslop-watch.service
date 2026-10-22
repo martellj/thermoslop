@@ -1,10 +1,10 @@
 [Unit]
-Description=ecobee HomeKit watcher (keeps the bar widget's state fresh)
+Description=ThermoSlop HomeKit watcher (keeps the bar widget's state fresh)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=%h/.local/bin/ecobee watch
+ExecStart=%h/.local/bin/thermoslop watch
 Restart=always
 RestartSec=10
 

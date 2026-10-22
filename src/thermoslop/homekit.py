@@ -22,8 +22,8 @@ from aiohomekit.model.services import ServicesTypes as ST
 from aiohomekit.zeroconf import ZeroconfServiceListener
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncZeroconf
 
-from ecobee import discovery
-from ecobee.config import CHARMAP_FILE, PAIRING_FILE, STATE_FILE, Config
+from thermoslop import discovery
+from thermoslop.config import CHARMAP_FILE, PAIRING_FILE, STATE_FILE, Config
 
 log = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ CURRENT_MODE = {**COMFORT, 3: "hold"}
 CONNECT_ERRORS = (OSError, TimeoutError, asyncio.TimeoutError)
 
 
-class EcobeeError(Exception):
+class ThermoSlopError(Exception):
     pass
 
 
@@ -45,7 +45,7 @@ def format_pin(pin: str) -> str:
     """HomeKit codes are used as XXX-XX-XXX; screens often show XXXX XXXX."""
     digits = re.sub(r"\D", "", pin)
     if len(digits) != 8:
-        raise EcobeeError(f"a HomeKit code has 8 digits, got {pin!r}")
+        raise ThermoSlopError(f"a HomeKit code has 8 digits, got {pin!r}")
     return f"{digits[:3]}-{digits[3:5]}-{digits[5:]}"
 
 
@@ -86,7 +86,7 @@ def _thermostat_accessory(accessories: Accessories) -> Accessory:
     for acc in accessories.accessories:
         if acc.services.first(service_type=ST.THERMOSTAT):
             return acc
-    raise EcobeeError("no thermostat service on this accessory")
+    raise ThermoSlopError("no thermostat service on this accessory")
 
 
 def _find(acc: Accessory, char_type: str):
@@ -173,11 +173,11 @@ def plan_setpoints(
             plan["heat"] = st["heat_setpoint"] + value
             plan["cool"] = st["cool_setpoint"] + value
         elif mode == "auto":
-            raise EcobeeError(f"{alias} is in auto mode; use --heat/--cool, or a relative change like +1")
+            raise ThermoSlopError(f"{alias} is in auto mode; use --heat/--cool, or a relative change like +1")
         else:
-            raise EcobeeError(f"{alias} is off; set a mode first (`ecobee mode heat`)")
+            raise ThermoSlopError(f"{alias} is off; set a mode first (`thermoslop mode heat`)")
     if not plan:
-        raise EcobeeError("nothing to set")
+        raise ThermoSlopError("nothing to set")
     return plan
 
 
@@ -261,19 +261,19 @@ class Home:
         """Resolve -t NAME (case-insensitive, prefix ok) and --house to aliases."""
         aliases = self.aliases()
         if not aliases:
-            raise EcobeeError("no thermostats paired yet; run `ecobee discover` then `ecobee pair NAME`")
+            raise ThermoSlopError("no thermostats paired yet; run `thermoslop discover` then `thermoslop pair NAME`")
         if house is not None:
             if house not in self.config.houses:
-                raise EcobeeError(f"unknown house {house!r} (config has: {', '.join(self.config.houses) or 'none'})")
+                raise ThermoSlopError(f"unknown house {house!r} (config has: {', '.join(self.config.houses) or 'none'})")
             aliases = [a for a in aliases if self.house(a) == house]
             if not aliases:
-                raise EcobeeError(f"no thermostats paired in {house}")
+                raise ThermoSlopError(f"no thermostats paired in {house}")
         if name is None:
             if not single or len(aliases) == 1:
                 return aliases
             if self.config.default in aliases:
                 return [self.config.default]
-            raise EcobeeError(
+            raise ThermoSlopError(
                 f"several thermostats paired ({', '.join(aliases)}); pick one with -t or set `default` in config"
             )
         key = slugify(name)
@@ -282,7 +282,7 @@ class Home:
         matches = [a for a in aliases if a.startswith(key)]
         if len(matches) == 1:
             return matches
-        raise EcobeeError(f"no single thermostat matches {name!r} (have: {', '.join(aliases)})")
+        raise ThermoSlopError(f"no single thermostat matches {name!r} (have: {', '.join(aliases)})")
 
     # -- pairing --
 
@@ -294,7 +294,7 @@ class Home:
         `get_pin` is an async callable returning the code.
         """
         if alias in self.controller.aliases:
-            raise EcobeeError(f"{alias!r} is already paired")
+            raise ThermoSlopError(f"{alias!r} is already paired")
         ip = self.controller.transports[TransportType.IP]
         pin = None
         try:
@@ -302,9 +302,9 @@ class Home:
             pin = format_pin(await get_pin())
             pairing = await finish(pin)
         except AuthenticationError:
-            raise EcobeeError(f"{device.name} rejected the HomeKit code {pin}; check the digits and try again") from None
+            raise ThermoSlopError(f"{device.name} rejected the HomeKit code {pin}; check the digits and try again") from None
         except HomeKitException as e:
-            raise EcobeeError(f"pairing with {device.name} failed: {e.__class__.__name__}: {e}") from None
+            raise ThermoSlopError(f"pairing with {device.name} failed: {e.__class__.__name__}: {e}") from None
         self.controller.aliases[alias] = pairing
         self.controller.pairings[pairing.pairing_data["AccessoryPairingID"].lower()] = pairing
         self._save()
@@ -342,7 +342,7 @@ class Home:
             except Exception as e:
                 if attempt == 0 and await self._relocate(alias):
                     continue
-                raise EcobeeError(f"{alias}: can't reach thermostat ({e.__class__.__name__}: {e})") from e
+                raise ThermoSlopError(f"{alias}: can't reach thermostat ({e.__class__.__name__}: {e})") from e
         raise AssertionError("unreachable")
 
     async def state(self, alias: str) -> dict:
@@ -356,11 +356,11 @@ class Home:
         for char_type, value in values.items():
             char = _find(acc, char_type)
             if char is None:
-                raise EcobeeError(f"{alias}: thermostat doesn't expose characteristic {char_type}")
+                raise ThermoSlopError(f"{alias}: thermostat doesn't expose characteristic {char_type}")
             updates.append((acc.aid, char.iid, value))
         result = await self.controller.aliases[alias].put_characteristics(updates)
         if failed := [r.get("description", r) for r in (result or {}).values() if r.get("status")]:
-            raise EcobeeError(f"{alias}: thermostat rejected the change: {failed}")
+            raise ThermoSlopError(f"{alias}: thermostat rejected the change: {failed}")
 
     async def set_temperature(
         self,

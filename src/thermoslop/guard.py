@@ -13,15 +13,15 @@ from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 
-from ecobee.config import AUDIT_FILE, McpConfig, degrees_in
-from ecobee.homekit import EcobeeError
+from thermoslop.config import AUDIT_FILE, McpConfig, degrees_in
+from thermoslop.homekit import ThermoSlopError
 
 WINDOW = 3600
 ROTATE_BYTES = 1_000_000
 SETPOINT_NAMES = {"target": "target", "heat": "heat setpoint", "cool": "cool setpoint"}
 
 
-class Refused(EcobeeError):
+class Refused(ThermoSlopError):
     """A change the guardrails won't make. Nothing was written."""
 
 

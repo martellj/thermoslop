@@ -1,26 +1,61 @@
-"""Paths and user configuration (~/.config/ecobee/config.toml)."""
+"""Paths and user configuration (~/.config/thermoslop/config.toml)."""
 
 from __future__ import annotations
 
 import ipaddress
 import os
 import re
+import sys
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from thermoslop import APP
 
 
 def _xdg(var: str, fallback: str) -> Path:
     return Path(os.environ.get(var) or Path.home() / fallback)
 
 
-CONFIG_DIR = _xdg("XDG_CONFIG_HOME", ".config") / "ecobee"
+CONFIG_DIR = _xdg("XDG_CONFIG_HOME", ".config") / APP
 CONFIG_FILE = CONFIG_DIR / "config.toml"
-DATA_DIR = _xdg("XDG_DATA_HOME", ".local/share") / "ecobee"
+DATA_DIR = _xdg("XDG_DATA_HOME", ".local/share") / APP
 PAIRING_FILE = DATA_DIR / "pairing.json"
 CHARMAP_FILE = DATA_DIR / "charmap.json"
-STATE_FILE = _xdg("XDG_CACHE_HOME", ".cache") / "ecobee" / "state.json"
-AUDIT_FILE = _xdg("XDG_STATE_HOME", ".local/state") / "ecobee" / "changes.jsonl"
+CACHE_DIR = _xdg("XDG_CACHE_HOME", ".cache") / APP
+STATE_FILE = CACHE_DIR / "state.json"
+STATE_DIR = _xdg("XDG_STATE_HOME", ".local/state") / APP
+AUDIT_FILE = STATE_DIR / "changes.jsonl"
+
+# Before the rename the project was called "ecobee"; its files are moved over.
+LEGACY = "ecobee"
+
+
+def migrate_legacy(dirs: tuple[Path, ...] = (CONFIG_DIR, DATA_DIR, CACHE_DIR, STATE_DIR)) -> list[Path]:
+    """Move files from each old `…/ecobee/` dir into the matching `…/thermoslop/` dir.
+
+    Per file, so it still works after the installer has created the new venv.
+    Never overwrites, and skips the old venv (it can't be moved; the installer
+    builds a new one). Returns the new paths.
+    """
+    moved = []
+    for new_dir in dirs:
+        old_dir = new_dir.with_name(LEGACY)
+        if not old_dir.is_dir():
+            continue
+        for old in sorted(old_dir.iterdir()):
+            new = new_dir / old.name
+            if old.name == "venv" or not old.is_file() or new.exists():
+                continue
+            new_dir.mkdir(parents=True, exist_ok=True)
+            old.replace(new)  # a rename, so pairing.json keeps mode 600
+            print(f"{APP}: moved {old} to {new}", file=sys.stderr)
+            moved.append(new)
+        try:
+            old_dir.rmdir()
+        except OSError:
+            pass  # not empty: the old venv, or files we wouldn't overwrite
+    return moved
 
 
 def parse_degrees(text: str | int | float) -> tuple[float, str]:
@@ -40,7 +75,7 @@ def degrees_in(text: str, units: str) -> float:
 
 @dataclass
 class McpConfig:
-    """Guardrails for changes made through `ecobee mcp` (the CLI isn't limited)."""
+    """Guardrails for changes made through `thermoslop mcp` (the CLI isn't limited)."""
 
     read_only: bool = False
     min_setpoint: str = "55F"
@@ -71,7 +106,7 @@ class Config:
     default: str | None = None
     # "F" or "C"; None follows each thermostat's display setting.
     units: str | None = None
-    # Seconds between full polls in `ecobee watch` (events arrive in between).
+    # Seconds between full polls in `thermoslop watch` (events arrive in between).
     poll_interval: int = 60
     mcp: McpConfig = field(default_factory=McpConfig)
 

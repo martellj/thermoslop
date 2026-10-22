@@ -16,7 +16,7 @@ import socket
 import time
 from collections.abc import Awaitable, Callable
 
-from ecobee.homekit import EcobeeError
+from thermoslop.homekit import ThermoSlopError
 
 log = logging.getLogger(__name__)
 
@@ -29,9 +29,9 @@ def check_bind(address: str) -> None:
     try:
         ip = ipaddress.ip_address(address)
     except ValueError:
-        raise EcobeeError(f"--bind needs a Tailscale IP address, not {address!r}") from None
+        raise ThermoSlopError(f"--bind needs a Tailscale IP address, not {address!r}") from None
     if not any(ip in net for net in TAILNET):
-        raise EcobeeError(f"refusing to listen on {address}: only Tailscale addresses (100.64.0.0/10, fd7a:115c:a1e0::/48)")
+        raise ThermoSlopError(f"refusing to listen on {address}: only Tailscale addresses (100.64.0.0/10, fd7a:115c:a1e0::/48)")
 
 
 async def _tailscale(*args: str) -> tuple[int, str]:
@@ -46,7 +46,7 @@ async def tailscale_ips() -> list[str]:
     """This machine's Tailscale addresses, IPv4 first."""
     code, out = await _tailscale("ip")
     if code != 0 or not out.split():
-        raise EcobeeError("can't get this machine's Tailscale address (is tailscaled running and logged in?)")
+        raise ThermoSlopError("can't get this machine's Tailscale address (is tailscaled running and logged in?)")
     return out.split()
 
 
