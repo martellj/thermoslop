@@ -14,6 +14,7 @@ from aiohomekit import Controller
 from aiohomekit.characteristic_cache import CharacteristicCacheFile
 from aiohomekit.controller import TransportType
 from aiohomekit.controller.ip.discovery import IpDiscovery
+from aiohomekit.exceptions import AuthenticationError, HomeKitException
 from aiohomekit.model import Accessories, Accessory
 from aiohomekit.model.characteristics import CharacteristicsTypes as CT
 from aiohomekit.model.services import ServicesTypes as ST
@@ -240,8 +241,13 @@ class Home:
         if alias in self.controller.aliases:
             raise EcobeeError(f"{alias!r} is already paired")
         ip = self.controller.transports[TransportType.IP]
-        finish = await IpDiscovery(ip, device.to_service()).async_start_pairing(alias)
-        pairing = await finish(pin)
+        try:
+            finish = await IpDiscovery(ip, device.to_service()).async_start_pairing(alias)
+            pairing = await finish(pin)
+        except AuthenticationError:
+            raise EcobeeError(f"{device.name} rejected the HomeKit code {pin}; check the digits and try again") from None
+        except HomeKitException as e:
+            raise EcobeeError(f"pairing with {device.name} failed: {e.__class__.__name__}: {e}") from None
         self.controller.aliases[alias] = pairing
         self.controller.pairings[pairing.pairing_data["AccessoryPairingID"].lower()] = pairing
         self._save()
