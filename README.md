@@ -46,6 +46,7 @@ All of them take `--json` (machine-readable; errors come back as
 | `ecobee discover [--all]` | Find HomeKit thermostats (or every HomeKit accessory with `--all`). |
 | `ecobee pair NAME`, `ecobee unpair -t NAME` | Manage pairings. |
 | `ecobee watch` | The daemon behind the widget (run by `ecobee-watch.service`). |
+| `ecobee mcp [--read-only]` | MCP server for AI clients (see below). |
 | `ecobee dump -t NAME` | Raw HomeKit accessory data, for debugging. |
 
 When more than one thermostat is paired, commands that change something need
@@ -53,6 +54,56 @@ When more than one thermostat is paired, commands that change something need
 
 Writing a setpoint creates a hold, just like changing it on the thermostat.
 `ecobee resume` clears it.
+
+## MCP server for AI clients
+
+`ecobee mcp` serves the thermostats as MCP tools over stdio:
+
+| Tool | Does |
+|---|---|
+| `list_thermostats`, `get_status` | Read-only. Same JSON as `ecobee status --json`. |
+| `set_temperature` | Absolute setpoint (`target`, or `heat`/`cool` in auto mode). |
+| `adjust_temperature` | Relative change, −5 to +5. |
+| `set_mode` | heat / cool / auto (off only if allowed). |
+| `set_comfort`, `resume_schedule` | Per thermostat, or a whole `house`. Reports per thermostat whether it took effect. |
+
+Pairing isn't exposed. Each tool takes `thermostat` (alias or prefix) and/or `house`.
+
+**Claude Code:**
+
+```bash
+claude mcp add --scope user ecobee -- ~/.local/bin/ecobee mcp
+```
+
+**Claude Desktop**, or any client that takes a JSON config:
+
+```json
+{ "mcpServers": { "ecobee": { "command": "/home/you/.local/bin/ecobee", "args": ["mcp"] } } }
+```
+
+### Guardrails
+
+The CLI is unrestricted. Changes through MCP are checked against `[mcp]` in the
+config:
+
+```toml
+[mcp]
+read_only = false            # true (or `ecobee mcp --read-only`) offers only the read tools
+min_setpoint = "55F"         # setpoints outside this range are refused ("13C" works too)
+max_setpoint = "80F"
+allow_off = false            # set_mode off is refused unless true
+max_changes_per_hour = 20    # each thermostat changed counts once; survives restarts
+```
+
+Refusals come back as tool errors that explain why, so the agent can tell you
+instead of retrying. Every attempted change is appended to
+`~/.local/state/ecobee/changes.jsonl` with the time, tool, arguments, caller,
+outcome, and the thermostat's mode and setpoints before and after. That
+includes refusals and failures.
+
+Comfort changes are verified by reading the thermostat back. An ecobee3 lite
+(firmware 4.8.70240) does apply away, home and resume, but takes 2–4 s to
+report them. Writes wait up to 8 s for the thermostat to report the change.
 
 ## Bar widget (`omarchy/john.ecobee`)
 
@@ -125,6 +176,7 @@ router makes this rarely needed.
 |---|---|
 | `~/.local/share/ecobee/pairing.json` | HomeKit pairing keys (mode 600; treat it like an SSH key) |
 | `~/.local/share/ecobee/charmap.json` | aiohomekit accessory cache |
+| `~/.local/state/ecobee/changes.jsonl` | Audit log of changes made through MCP |
 | `~/.cache/ecobee/state.json` | Latest state (each entry has its `house`), written atomically by the watcher and CLI |
 
 ## Development

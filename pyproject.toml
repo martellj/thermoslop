@@ -7,7 +7,7 @@ name = "ecobee-hk"
 version = "0.1.0"
 description = "Local (HomeKit) CLI and Omarchy bar widget for ecobee thermostats"
 requires-python = ">=3.11"
-dependencies = ["aiohomekit>=3.2"]
+dependencies = ["aiohomekit>=3.2", "mcp>=2.3,<3"]
 
 [project.optional-dependencies]
 test = ["pytest"]

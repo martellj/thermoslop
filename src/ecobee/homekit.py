@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import time
+from collections.abc import Callable
 from typing import Any
 
 from aiohomekit import Controller
@@ -153,6 +154,31 @@ def thermostat_state(
         "sensors": _sensors(accessories, units),
         "updated_at": time.time(),
     }
+
+
+def plan_setpoints(
+    st: dict, value: float | None = None, *, relative: bool = False, heat: float | None = None, cool: float | None = None
+) -> dict[str, float]:
+    """The setpoints a change asks for, in display units: keys among target, heat and cool."""
+    plan: dict[str, float] = {}
+    if heat is not None:
+        plan["heat"] = heat
+    if cool is not None:
+        plan["cool"] = cool
+    if value is not None:
+        alias, mode = st["alias"], st["mode"]
+        if mode in ("heat", "cool"):
+            plan["target"] = st["target"] + value if relative else value
+        elif mode == "auto" and relative:
+            plan["heat"] = st["heat_setpoint"] + value
+            plan["cool"] = st["cool_setpoint"] + value
+        elif mode == "auto":
+            raise EcobeeError(f"{alias} is in auto mode; use --heat/--cool, or a relative change like +1")
+        else:
+            raise EcobeeError(f"{alias} is off; set a mode first (`ecobee mode heat`)")
+    if not plan:
+        raise EcobeeError("nothing to set")
+    return plan
 
 
 def unavailable_state(alias: str, error: str, previous: dict | None = None, house: str | None = None) -> dict:
@@ -344,48 +370,44 @@ class Home:
         relative: bool = False,
         heat: float | None = None,
         cool: float | None = None,
+        check: Callable[[dict, dict[str, float]], None] | None = None,
     ) -> dict:
+        """`check(state, plan)` may raise to veto the change before anything is written."""
         accessories = await self.fetch(alias)
-        st = thermostat_state(alias, accessories, self.config.units)
-        units, mode = st["units"], st["mode"]
-        values: dict[str, Any] = {}
-        if heat is not None:
-            values[CT.TEMPERATURE_HEATING_THRESHOLD] = to_c(heat, units)
-        if cool is not None:
-            values[CT.TEMPERATURE_COOLING_THRESHOLD] = to_c(cool, units)
-        if value is not None:
-            if mode in ("heat", "cool"):
-                target = st["target"] + value if relative else value
-                values[CT.TEMPERATURE_TARGET] = to_c(target, units)
-            elif mode == "auto" and relative:
-                values[CT.TEMPERATURE_HEATING_THRESHOLD] = to_c(st["heat_setpoint"] + value, units)
-                values[CT.TEMPERATURE_COOLING_THRESHOLD] = to_c(st["cool_setpoint"] + value, units)
-            elif mode == "auto":
-                raise EcobeeError(f"{alias} is in auto mode; use --heat/--cool, or a relative change like +1")
-            else:
-                raise EcobeeError(f"{alias} is off; set a mode first (`ecobee mode heat`)")
-        if not values:
-            raise EcobeeError("nothing to set")
-        await self.write(alias, accessories, values)
-        return await self._settled(alias)
+        st = thermostat_state(alias, accessories, self.config.units, self.house(alias))
+        plan = plan_setpoints(st, value, relative=relative, heat=heat, cool=cool)
+        if check:
+            check(st, plan)
+        chars = {"target": CT.TEMPERATURE_TARGET, "heat": CT.TEMPERATURE_HEATING_THRESHOLD, "cool": CT.TEMPERATURE_COOLING_THRESHOLD}
+        await self.write(alias, accessories, {chars[k]: to_c(v, st["units"]) for k, v in plan.items()})
+        return await self._settled(alias, lambda s: s["comfort"] in (None, "hold"))
 
     async def set_mode(self, alias: str, mode: str) -> dict:
         code = {v: k for k, v in HVAC_MODES.items()}[mode]
         await self.write(alias, await self.fetch(alias), {CT.HEATING_COOLING_TARGET: code})
-        return await self._settled(alias)
+        return await self._settled(alias, lambda s: s["mode"] == mode)
 
     async def set_comfort(self, alias: str, comfort: str) -> dict:
         code = {v: k for k, v in COMFORT.items()}[comfort]
         await self.write(alias, await self.fetch(alias), {CT.VENDOR_ECOBEE_SET_HOLD_SCHEDULE: code})
-        return await self._settled(alias)
+        return await self._settled(alias, lambda s: s["comfort"] == comfort)
 
     async def resume(self, alias: str) -> dict:
         await self.write(alias, await self.fetch(alias), {CT.VENDOR_ECOBEE_CLEAR_HOLD: True})
-        return await self._settled(alias)
+        return await self._settled(alias, lambda s: s["comfort"] in (None, *COMFORT.values()))
 
-    async def _settled(self, alias: str) -> dict:
-        # The thermostat takes a moment to reflect holds in its read values.
-        await asyncio.sleep(1)
-        state = await self.state(alias)
+    async def _settled(self, alias: str, done: Callable[[dict], bool], timeout: float = 8) -> dict:
+        """Re-read until `done(state)`, or give up after `timeout` and return what it reports.
+
+        Thermostats take a moment to reflect a change in their read values; an
+        ecobee3 lite takes 2-4 s to report a comfort change.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while True:
+            await asyncio.sleep(1)
+            state = await self.state(alias)
+            if done(state) or loop.time() >= deadline:
+                break
         write_cache([state])
         return state

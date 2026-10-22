@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 import os
+import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -19,6 +20,42 @@ DATA_DIR = _xdg("XDG_DATA_HOME", ".local/share") / "ecobee"
 PAIRING_FILE = DATA_DIR / "pairing.json"
 CHARMAP_FILE = DATA_DIR / "charmap.json"
 STATE_FILE = _xdg("XDG_CACHE_HOME", ".cache") / "ecobee" / "state.json"
+AUDIT_FILE = _xdg("XDG_STATE_HOME", ".local/state") / "ecobee" / "changes.jsonl"
+
+
+def parse_degrees(text: str | int | float) -> tuple[float, str]:
+    """'55F' / '13C' / '12.5 c' -> (value, unit). A bare number is Fahrenheit."""
+    m = re.fullmatch(r"\s*(-?\d+(?:\.\d+)?)\s*°?\s*([FfCc]?)\s*", str(text))
+    if not m:
+        raise ValueError(f"not a temperature: {text!r} (use e.g. \"55F\" or \"13C\")")
+    return float(m.group(1)), (m.group(2) or "F").upper()
+
+
+def degrees_in(text: str, units: str) -> float:
+    value, unit = parse_degrees(text)
+    if unit == units:
+        return value
+    return value * 9 / 5 + 32 if units == "F" else (value - 32) * 5 / 9
+
+
+@dataclass
+class McpConfig:
+    """Guardrails for changes made through `ecobee mcp` (the CLI isn't limited)."""
+
+    read_only: bool = False
+    min_setpoint: str = "55F"
+    max_setpoint: str = "80F"
+    allow_off: bool = False
+    max_changes_per_hour: int = 20
+    http_port: int = 8765
+    # Tailnet login names ("alice@" matches any login starting with it) or node
+    # names allowed over HTTP. Empty means the owner of this node.
+    allow: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        low, high = parse_degrees(self.min_setpoint), parse_degrees(self.max_setpoint)
+        if degrees_in(self.min_setpoint, "F") >= degrees_in(self.max_setpoint, "F"):
+            raise ValueError(f"[mcp] min_setpoint {low} must be below max_setpoint {high}")
 
 
 @dataclass
@@ -36,6 +73,7 @@ class Config:
     units: str | None = None
     # Seconds between full polls in `ecobee watch` (events arrive in between).
     poll_interval: int = 60
+    mcp: McpConfig = field(default_factory=McpConfig)
 
     def house_of(self, address: str | None) -> str | None:
         if not address:
@@ -45,6 +83,13 @@ class Config:
             if any(ip in ipaddress.ip_network(s, strict=False) for s in subnets):
                 return house
         return None
+
+
+def _mcp(raw: dict) -> McpConfig:
+    known = set(McpConfig.__dataclass_fields__)
+    if unknown := set(raw) - known:
+        raise ValueError(f"unknown [mcp] setting(s): {', '.join(sorted(unknown))} (known: {', '.join(sorted(known))})")
+    return McpConfig(**raw)
 
 
 def load_config(path: Path = CONFIG_FILE) -> Config:
@@ -62,4 +107,5 @@ def load_config(path: Path = CONFIG_FILE) -> Config:
         default=raw.get("default"),
         units=units.upper() if units else None,
         poll_interval=int(raw.get("poll_interval", 60)),
+        mcp=_mcp(raw.get("mcp", {})),
     )

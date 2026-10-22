@@ -10,18 +10,15 @@ import asyncio
 import json
 import logging
 import sys
-import time
 
-from ecobee import discovery
+from ecobee import discovery, ops
 from ecobee.config import CONFIG_FILE, load_config
 from ecobee.homekit import (
     COMFORT,
     HVAC_MODES,
     EcobeeError,
     Home,
-    read_cache,
     slugify,
-    unavailable_state,
     write_cache,
 )
 
@@ -139,27 +136,9 @@ async def cmd_unpair(args, config) -> int:
     return 0
 
 
-def _fresh_cache(aliases: list[str], max_age: float) -> list[dict] | None:
-    cached = read_cache().get("thermostats", {})
-    states = [cached.get(a) for a in aliases]
-    now = time.time()
-    if all(s and s.get("available") and now - s.get("updated_at", 0) < max_age for s in states):
-        return states
-    return None
-
-
 async def cmd_status(args, config) -> int:
     async with Home(config) as home:
-        aliases = home.pick(args.thermostat, args.house)
-        states = None if args.live else _fresh_cache(aliases, max(2 * config.poll_interval, 150))
-        if states is None:
-            states = []
-            for alias in aliases:
-                try:
-                    states.append(await home.state(alias))
-                except EcobeeError as e:
-                    states.append(unavailable_state(alias, str(e), house=home.house(alias)))
-            write_cache([s for s in states if s["available"]])
+        states = await ops.status(home, args.thermostat, args.house, live=args.live)
     emit(args, states, format_states(states))
     return 0 if all(s["available"] for s in states) else 1
 
@@ -175,32 +154,30 @@ def _parse_temp(text: str) -> tuple[float, bool]:
 async def cmd_set(args, config) -> int:
     value, relative = _parse_temp(args.temperature) if args.temperature else (None, False)
     async with Home(config) as home:
-        (alias,) = home.pick(args.thermostat, args.house, single=True)
-        state = await home.set_temperature(alias, value, relative=relative, heat=args.heat, cool=args.cool)
+        state = await ops.set_temperature(
+            home, args.thermostat, args.house, value, relative=relative, heat=args.heat, cool=args.cool
+        )
     emit(args, state, format_state(state))
     return 0
 
 
 async def cmd_mode(args, config) -> int:
     async with Home(config) as home:
-        (alias,) = home.pick(args.thermostat, args.house, single=True)
-        state = await home.set_mode(alias, args.mode)
+        state = await ops.set_mode(home, args.mode, args.thermostat, args.house)
     emit(args, state, format_state(state))
     return 0
 
 
 async def cmd_comfort(args, config) -> int:
     async with Home(config) as home:
-        aliases = home.pick(args.thermostat, args.house, single=not (args.all or args.house))
-        states = [await home.set_comfort(alias, args.comfort) for alias in aliases]
+        states = await ops.set_comfort(home, args.comfort, args.thermostat, args.house, all=args.all)
     emit(args, states, format_states(states))
     return 0
 
 
 async def cmd_resume(args, config) -> int:
     async with Home(config) as home:
-        aliases = home.pick(args.thermostat, args.house, single=not (args.all or args.house))
-        states = [await home.resume(alias) for alias in aliases]
+        states = await ops.resume(home, args.thermostat, args.house, all=args.all)
     emit(args, states, format_states(states))
     return 0
 
@@ -210,6 +187,13 @@ async def cmd_watch(args, config) -> int:
 
     async with Home(config) as home:
         await watch(home)
+    return 0
+
+
+async def cmd_mcp(args, config) -> int:
+    from ecobee import mcp_server
+
+    await mcp_server.serve_stdio(config, read_only=args.read_only)
     return 0
 
 
@@ -276,6 +260,10 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("watch", parents=[common], help="daemon: keep the bar widget's state fresh")
     s.set_defaults(func=cmd_watch)
 
+    s = sub.add_parser("mcp", parents=[common], help="MCP server for AI clients (stdio)")
+    s.add_argument("--read-only", action="store_true", help="offer only the status tools")
+    s.set_defaults(func=cmd_mcp)
+
     s = sub.add_parser("dump", parents=[common], help="raw HomeKit accessory data (debugging)")
     s.set_defaults(func=cmd_dump)
     return p
@@ -285,7 +273,11 @@ def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     level = logging.DEBUG if args.verbose > 1 else logging.INFO if args.verbose or args.command == "watch" else logging.WARNING
     logging.basicConfig(level=level, format="%(levelname)s %(name)s: %(message)s")
-    config = load_config()
+    try:
+        config = load_config()
+    except ValueError as e:
+        print(f"ecobee: {CONFIG_FILE}: {e}", file=sys.stderr)
+        sys.exit(1)
     try:
         code = asyncio.run(args.func(args, config))
     except EcobeeError as e:
