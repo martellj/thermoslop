@@ -76,3 +76,8 @@ def test_helpers():
         "id": "AA:BB:CC:DD:EE:FF",
         "md": "ecobee3 lite",
     }
+
+
+def test_manual_hold():
+    st = thermostat_state("main-floor", _ecobee(comfort=3), units="F")
+    assert st["comfort"] == "hold"

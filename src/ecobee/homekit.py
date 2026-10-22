@@ -30,6 +30,8 @@ HVAC_MODES = {0: "off", 1: "heat", 2: "cool", 3: "auto"}
 HVAC_ACTIONS = {0: "idle", 1: "heating", 2: "cooling"}
 # ecobee's vendor characteristics number comfort settings this way.
 COMFORT = {0: "home", 1: "sleep", 2: "away"}
+# What the thermostat reports it's following; 3 is a manual setpoint hold.
+CURRENT_MODE = {**COMFORT, 3: "hold"}
 
 CONNECT_ERRORS = (OSError, TimeoutError, asyncio.TimeoutError)
 
@@ -60,7 +62,8 @@ def from_c(celsius: float | None, units: str) -> float | None:
 
 
 def to_c(value: float, units: str) -> float:
-    return round((value - 32) * 5 / 9, 2) if units == "F" else value
+    # HomeKit setpoints have minStep 0.1; finer values are rejected.
+    return round((value - 32) * 5 / 9 if units == "F" else value, 1)
 
 
 def _reading(celsius: float | None, units: str) -> float | None:
@@ -143,7 +146,7 @@ def thermostat_state(alias: str, accessories: Accessories, units: str | None = N
         "target": _setpoint(svc.value(CT.TEMPERATURE_TARGET), units) if mode in ("heat", "cool") else None,
         "heat_setpoint": _setpoint(svc.value(CT.TEMPERATURE_HEATING_THRESHOLD), units),
         "cool_setpoint": _setpoint(svc.value(CT.TEMPERATURE_COOLING_THRESHOLD), units),
-        "comfort": COMFORT.get(comfort) if comfort is not None else None,
+        "comfort": CURRENT_MODE.get(comfort) if comfort is not None else None,
         "sensors": _sensors(accessories, units),
         "updated_at": time.time(),
     }
