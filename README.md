@@ -83,7 +83,29 @@ subnets = ["192.168.1.0/24"]  # unicast discovery fallback (see below)
 default = "main-floor"         # thermostat for commands without -t
 units = "F"                    # override each thermostat's display units
 poll_interval = 60             # watcher's full refresh, between events
+
+[houses]                       # optional; subnets here are scanned too
+home = ["192.168.1.0/24"]
+cabin = ["192.168.2.0/24"]
 ```
+
+## Several houses
+
+A thermostat belongs to the house whose subnet holds its IP. One controller
+can run every house as long as it can route to each house's LAN. Here that's
+Tailscale, with each house's OpenWrt router advertising its LAN as a subnet
+route, and `tailscale set --accept-routes` on this machine.
+
+- `ecobee status` groups thermostats under a heading per house.
+- `--house cabin` limits any command to one house; `ecobee away --house cabin`
+  holds away on all of them.
+- When a thermostat's name is already taken (two "Main Floor"s), `pair`
+  prefixes the alias with its house: `cabin-main-floor`.
+- The widget groups temperatures per house (`68° 70° │ 55°`).
+  `"house": "cabin"` on a widget entry limits it to one house.
+
+If the tunnel drops, that house's thermostats show as unavailable and keep
+running their own schedules.
 
 ## Networking notes
 
@@ -103,7 +125,7 @@ router makes this rarely needed.
 |---|---|
 | `~/.local/share/ecobee/pairing.json` | HomeKit pairing keys (mode 600; treat it like an SSH key) |
 | `~/.local/share/ecobee/charmap.json` | aiohomekit accessory cache |
-| `~/.cache/ecobee/state.json` | Latest state, written atomically by the watcher and CLI |
+| `~/.cache/ecobee/state.json` | Latest state (each entry has its `house`), written atomically by the watcher and CLI |
 
 ## Development
 

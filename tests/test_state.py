@@ -81,3 +81,22 @@ def test_helpers():
 def test_manual_hold():
     st = thermostat_state("main-floor", _ecobee(comfort=3), units="F")
     assert st["comfort"] == "hold"
+
+
+def test_house_of():
+    from ecobee.config import Config
+
+    config = Config(houses={"home": ["192.168.1.0/24"], "cabin": ["192.168.2.0/24"]})
+    assert config.house_of("192.168.2.31") == "cabin"
+    assert config.house_of("192.168.1.186") == "home"
+    assert config.house_of("10.0.0.5") is None
+
+
+def test_status_groups_by_house():
+    from ecobee.cli import format_states
+
+    home = thermostat_state("main-floor", _ecobee(), house="home")
+    cabin = thermostat_state("cabin-main-floor", _ecobee(), house="cabin")
+    text = format_states([home, cabin])
+    assert text.startswith("Home\n  Main Floor:") and "\n\nCabin\n  Main Floor:" in text
+    assert format_states([home]).startswith("Main Floor:")

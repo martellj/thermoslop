@@ -124,7 +124,9 @@ def _sensors(accessories: Accessories, units: str) -> list[dict]:
     return sensors
 
 
-def thermostat_state(alias: str, accessories: Accessories, units: str | None = None) -> dict:
+def thermostat_state(
+    alias: str, accessories: Accessories, units: str | None = None, house: str | None = None
+) -> dict:
     acc = _thermostat_accessory(accessories)
     svc = acc.services.first(service_type=ST.THERMOSTAT)
     units = units or ("F" if svc.value(CT.TEMPERATURE_UNITS) == 1 else "C")
@@ -137,6 +139,7 @@ def thermostat_state(alias: str, accessories: Accessories, units: str | None = N
     return {
         "alias": alias,
         "name": acc.name,
+        "house": house,
         "available": True,
         "units": units,
         "temperature": _reading(svc.value(CT.TEMPERATURE_CURRENT), units),
@@ -152,8 +155,8 @@ def thermostat_state(alias: str, accessories: Accessories, units: str | None = N
     }
 
 
-def unavailable_state(alias: str, error: str, previous: dict | None = None) -> dict:
-    state = dict(previous or {"alias": alias, "name": alias})
+def unavailable_state(alias: str, error: str, previous: dict | None = None, house: str | None = None) -> dict:
+    state = dict(previous or {"alias": alias, "name": alias, "house": house})
     state.update(available=False, error=error)
     return state
 
@@ -225,11 +228,20 @@ class Home:
     def aliases(self) -> list[str]:
         return sorted(self.controller.aliases)
 
-    def pick(self, name: str | None, *, single: bool = False) -> list[str]:
-        """Resolve -t NAME (case-insensitive, prefix ok) to aliases."""
+    def house(self, alias: str) -> str | None:
+        return self.config.house_of(self.controller.aliases[alias].pairing_data.get("AccessoryIP"))
+
+    def pick(self, name: str | None, house: str | None = None, *, single: bool = False) -> list[str]:
+        """Resolve -t NAME (case-insensitive, prefix ok) and --house to aliases."""
         aliases = self.aliases()
         if not aliases:
             raise EcobeeError("no thermostats paired yet; run `ecobee discover` then `ecobee pair NAME`")
+        if house is not None:
+            if house not in self.config.houses:
+                raise EcobeeError(f"unknown house {house!r} (config has: {', '.join(self.config.houses) or 'none'})")
+            aliases = [a for a in aliases if self.house(a) == house]
+            if not aliases:
+                raise EcobeeError(f"no thermostats paired in {house}")
         if name is None:
             if not single or len(aliases) == 1:
                 return aliases
@@ -308,7 +320,7 @@ class Home:
         raise AssertionError("unreachable")
 
     async def state(self, alias: str) -> dict:
-        return thermostat_state(alias, await self.fetch(alias), self.config.units)
+        return thermostat_state(alias, await self.fetch(alias), self.config.units, self.house(alias))
 
     # -- writing --
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import tomllib
 from dataclasses import dataclass, field
@@ -23,14 +24,27 @@ STATE_FILE = _xdg("XDG_CACHE_HOME", ".cache") / "ecobee" / "state.json"
 @dataclass
 class Config:
     # Subnets to scan with unicast DNS-SD when multicast discovery finds nothing
-    # (VMs behind NAT, separate VLANs). e.g. ["192.168.1.0/24"]
+    # (VMs behind NAT, separate VLANs). e.g. ["192.168.1.0/24"]. Includes
+    # every house's subnets.
     subnets: list[str] = field(default_factory=list)
+    # House name -> its subnets, e.g. {"cabin": ["192.168.2.0/24"]}. A
+    # thermostat belongs to the house whose subnet holds its IP.
+    houses: dict[str, list[str]] = field(default_factory=dict)
     # Alias of the thermostat commands act on when -t is not given.
     default: str | None = None
     # "F" or "C"; None follows each thermostat's display setting.
     units: str | None = None
     # Seconds between full polls in `ecobee watch` (events arrive in between).
     poll_interval: int = 60
+
+    def house_of(self, address: str | None) -> str | None:
+        if not address:
+            return None
+        ip = ipaddress.ip_address(address)
+        for house, subnets in self.houses.items():
+            if any(ip in ipaddress.ip_network(s, strict=False) for s in subnets):
+                return house
+        return None
 
 
 def load_config(path: Path = CONFIG_FILE) -> Config:
@@ -39,8 +53,12 @@ def load_config(path: Path = CONFIG_FILE) -> Config:
     except FileNotFoundError:
         return Config()
     units = raw.get("units")
+    houses = {name: list(subnets) for name, subnets in raw.get("houses", {}).items()}
+    subnets = list(raw.get("subnets", []))
+    subnets += [s for nets in houses.values() for s in nets if s not in subnets]
     return Config(
-        subnets=list(raw.get("subnets", [])),
+        subnets=subnets,
+        houses=houses,
         default=raw.get("default"),
         units=units.upper() if units else None,
         poll_interval=int(raw.get("poll_interval", 60)),

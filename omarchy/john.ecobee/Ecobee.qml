@@ -9,6 +9,8 @@
 //
 // Optional settings on the widget's entry in shell.json:
 //   "thermostat": "upstairs"   show / control only this one
+//   "house": "cabin"           show / control only this house's thermostats
+// With several houses shown, temperatures are grouped per house: 68° 70° │ 55°
 import QtQuick
 import Quickshell
 import Quickshell.Io
@@ -21,6 +23,7 @@ BarWidget {
 
   readonly property string stateFile: Quickshell.env("HOME") + "/.cache/ecobee/state.json"
   readonly property string only: root.settings && root.settings.thermostat ? String(root.settings.thermostat) : ""
+  readonly property string house: root.settings && root.settings.house ? String(root.settings.house) : ""
   // A reading older than this means `ecobee watch` isn't running.
   readonly property int staleSeconds: 600
 
@@ -28,7 +31,8 @@ BarWidget {
   property real now: Date.now() / 1000
   property int pendingDelta: 0
 
-  readonly property var shown: only ? thermostats.filter(t => t.alias === only) : thermostats
+  readonly property var shown: thermostats.filter(t => (!only || t.alias === only) && (!house || t.house === house))
+  readonly property var houses: [...new Set(shown.map(t => t.house || ""))]
   readonly property var live: shown.filter(t => t.available && now - (t.updated_at || 0) < staleSeconds)
   readonly property string scrollTarget: only || (shown.length ? shown[0].alias : "")
   readonly property bool anyAway: live.some(t => t.comfort === "away")
@@ -36,7 +40,8 @@ BarWidget {
   function load(text) {
     try {
       const stats = JSON.parse(text || "{}").thermostats || {}
-      root.thermostats = Object.keys(stats).sort().map(k => stats[k])
+      root.thermostats = Object.keys(stats).map(k => stats[k])
+        .sort((a, b) => (a.house || "").localeCompare(b.house || "") || a.alias.localeCompare(b.alias))
     } catch (e) {
       // Mid-write reads can't happen (the file is replaced atomically), so a
       // parse failure means a bad file: keep the last good reading.
@@ -56,9 +61,10 @@ BarWidget {
 
   function label() {
     if (!shown.length) return ""
-    const temps = shown.map(t => t.available ? deg(t.temperature) : "?")
+    const temps = houses.map(h => shown.filter(t => (t.house || "") === h)
+      .map(t => t.available ? deg(t.temperature) : "?").join(" "))
     const pending = pendingDelta ? "  →" + (pendingDelta > 0 ? "+" : "") + pendingDelta : ""
-    return icon() + " " + temps.join(" ") + pending
+    return icon() + " " + temps.join(" │ ") + pending
   }
 
   function setpoint(t) {
@@ -69,15 +75,22 @@ BarWidget {
 
   function tooltip() {
     if (!shown.length) return "ecobee: no data (is `ecobee watch` running?)"
-    return shown.map(function(t) {
-      if (!t.available) return t.name + ": unavailable"
-      let line = t.name + "  " + deg(t.temperature) + "  " + t.action + " → " + setpoint(t) + " " + t.mode
-      if (t.comfort) line += " · " + t.comfort
-      if (t.humidity !== null && t.humidity !== undefined) line += " · " + t.humidity + "%"
-      const occupied = (t.sensors || []).filter(s => s.occupied).map(s => s.name)
-      if (occupied.length) line += "\n  occupied: " + occupied.join(", ")
-      return line
+    const grouped = houses.length > 1
+    return shown.map(function(t, i) {
+      const heading = grouped && (i === 0 || shown[i - 1].house !== t.house)
+        ? (i ? "\n" : "") + (t.house ? t.house[0].toUpperCase() + t.house.slice(1) : "Other") + "\n" : ""
+      return heading + describe(t)
     }).join("\n")
+  }
+
+  function describe(t) {
+    if (!t.available) return t.name + ": unavailable"
+    let line = t.name + "  " + deg(t.temperature) + "  " + t.action + " → " + setpoint(t) + " " + t.mode
+    if (t.comfort) line += " · " + t.comfort
+    if (t.humidity !== null && t.humidity !== undefined) line += " · " + t.humidity + "%"
+    const occupied = (t.sensors || []).filter(s => s.occupied).map(s => s.name)
+    if (occupied.length) line += "\n  occupied: " + occupied.join(", ")
+    return line
   }
 
   function ecobee(args) {
@@ -133,7 +146,8 @@ BarWidget {
     tooltipText: root.tooltip()
 
     onPressed: function(b) {
-      const all = root.only ? "-t " + Util.shellQuote(root.only) : "--all"
+      const all = root.only ? "-t " + Util.shellQuote(root.only)
+        : root.house ? "--all --house " + Util.shellQuote(root.house) : "--all"
       if (b === Qt.RightButton) root.ecobee((root.anyAway ? "resume " : "away ") + all)
       else if (b === Qt.MiddleButton) root.ecobee("resume " + all)
       else if (root.bar) root.bar.run("omarchy-notification-send -g 󰔏 Ecobee \"$(ecobee status 2>&1)\"")

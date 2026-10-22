@@ -14,7 +14,16 @@ import time
 
 from ecobee import discovery
 from ecobee.config import CONFIG_FILE, load_config
-from ecobee.homekit import COMFORT, HVAC_MODES, EcobeeError, Home, read_cache, slugify, write_cache
+from ecobee.homekit import (
+    COMFORT,
+    HVAC_MODES,
+    EcobeeError,
+    Home,
+    read_cache,
+    slugify,
+    unavailable_state,
+    write_cache,
+)
 
 ACTION_ARROW = {"heating": "▲ heating", "cooling": "▼ cooling", "idle": "idle", "off": "off"}
 
@@ -55,6 +64,18 @@ def format_state(st: dict) -> str:
             bits.append("occupied" if sensor["occupied"] else "empty")
         lines.append(f"    {sensor['name']}: {', '.join(bits)}")
     return "\n".join(lines)
+
+
+def format_states(states: list[dict]) -> str:
+    """One block per thermostat, under a heading per house when there are several."""
+    houses = list(dict.fromkeys(s.get("house") for s in states))
+    if len(houses) < 2:
+        return "\n".join(format_state(s) for s in states)
+    blocks = []
+    for house in houses:
+        lines = [format_state(s) for s in states if s.get("house") == house]
+        blocks.append(f"{(house or 'other').title()}\n" + "\n".join("  " + l.replace("\n", "\n  ") for l in lines))
+    return "\n\n".join(blocks)
 
 
 def emit(args, payload, text: str) -> None:
@@ -99,8 +120,10 @@ async def cmd_pair(args, config) -> int:
         print("HomeKit code: ", end="", file=sys.stderr, flush=True)
         return (await asyncio.to_thread(sys.stdin.readline)).strip()
 
-    alias = args.alias or slugify(device.name)
     async with Home(config) as home:
+        alias = args.alias or slugify(device.name)
+        if not args.alias and alias in home.aliases() and (house := config.house_of(device.address)):
+            alias = f"{house}-{alias}"  # e.g. a second house's "Main Floor"
         await home.pair(device, alias, get_pin)
         state = await home.state(alias)
     write_cache([state])
@@ -110,7 +133,7 @@ async def cmd_pair(args, config) -> int:
 
 async def cmd_unpair(args, config) -> int:
     async with Home(config) as home:
-        (alias,) = home.pick(args.thermostat, single=True)
+        (alias,) = home.pick(args.thermostat, args.house, single=True)
         await home.unpair(alias)
     emit(args, {"unpaired": alias}, f"Unpaired {alias}.")
     return 0
@@ -127,7 +150,7 @@ def _fresh_cache(aliases: list[str], max_age: float) -> list[dict] | None:
 
 async def cmd_status(args, config) -> int:
     async with Home(config) as home:
-        aliases = home.pick(args.thermostat)
+        aliases = home.pick(args.thermostat, args.house)
         states = None if args.live else _fresh_cache(aliases, max(2 * config.poll_interval, 150))
         if states is None:
             states = []
@@ -135,9 +158,9 @@ async def cmd_status(args, config) -> int:
                 try:
                     states.append(await home.state(alias))
                 except EcobeeError as e:
-                    states.append({"alias": alias, "name": alias, "available": False, "error": str(e)})
+                    states.append(unavailable_state(alias, str(e), house=home.house(alias)))
             write_cache([s for s in states if s["available"]])
-    emit(args, states, "\n".join(format_state(s) for s in states))
+    emit(args, states, format_states(states))
     return 0 if all(s["available"] for s in states) else 1
 
 
@@ -152,7 +175,7 @@ def _parse_temp(text: str) -> tuple[float, bool]:
 async def cmd_set(args, config) -> int:
     value, relative = _parse_temp(args.temperature) if args.temperature else (None, False)
     async with Home(config) as home:
-        (alias,) = home.pick(args.thermostat, single=True)
+        (alias,) = home.pick(args.thermostat, args.house, single=True)
         state = await home.set_temperature(alias, value, relative=relative, heat=args.heat, cool=args.cool)
     emit(args, state, format_state(state))
     return 0
@@ -160,7 +183,7 @@ async def cmd_set(args, config) -> int:
 
 async def cmd_mode(args, config) -> int:
     async with Home(config) as home:
-        (alias,) = home.pick(args.thermostat, single=True)
+        (alias,) = home.pick(args.thermostat, args.house, single=True)
         state = await home.set_mode(alias, args.mode)
     emit(args, state, format_state(state))
     return 0
@@ -168,17 +191,17 @@ async def cmd_mode(args, config) -> int:
 
 async def cmd_comfort(args, config) -> int:
     async with Home(config) as home:
-        aliases = home.pick(args.thermostat) if args.all else home.pick(args.thermostat, single=True)
+        aliases = home.pick(args.thermostat, args.house, single=not (args.all or args.house))
         states = [await home.set_comfort(alias, args.comfort) for alias in aliases]
-    emit(args, states, "\n".join(format_state(s) for s in states))
+    emit(args, states, format_states(states))
     return 0
 
 
 async def cmd_resume(args, config) -> int:
     async with Home(config) as home:
-        aliases = home.pick(args.thermostat) if args.all else home.pick(args.thermostat, single=True)
+        aliases = home.pick(args.thermostat, args.house, single=not (args.all or args.house))
         states = [await home.resume(alias) for alias in aliases]
-    emit(args, states, "\n".join(format_state(s) for s in states))
+    emit(args, states, format_states(states))
     return 0
 
 
@@ -192,7 +215,7 @@ async def cmd_watch(args, config) -> int:
 
 async def cmd_dump(args, config) -> int:
     async with Home(config) as home:
-        (alias,) = home.pick(args.thermostat, single=True)
+        (alias,) = home.pick(args.thermostat, args.house, single=True)
         accessories = await home.fetch(alias)
     print(json.dumps(accessories.serialize(), indent=1, default=str))
     return 0
@@ -205,6 +228,7 @@ def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true", help="machine-readable output")
     common.add_argument("-t", "--thermostat", help="thermostat name/alias (prefix ok)")
+    common.add_argument("--house", help="only thermostats in this house (from [houses] in config)")
     common.add_argument("-v", "--verbose", action="count", default=0)
 
     p = argparse.ArgumentParser(prog="ecobee", description=__doc__, parents=[common])
@@ -226,11 +250,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     for comfort in COMFORT.values():
         s = sub.add_parser(comfort, parents=[common], help=f"hold the {comfort} comfort setting")
-        s.add_argument("--all", action="store_true", help="every paired thermostat")
+        s.add_argument("--all", action="store_true", help="every paired thermostat (or every one in --house)")
         s.set_defaults(func=cmd_comfort, comfort=comfort)
 
     s = sub.add_parser("resume", parents=[common], help="clear holds and resume the schedule")
-    s.add_argument("--all", action="store_true", help="every paired thermostat")
+    s.add_argument("--all", action="store_true", help="every paired thermostat (or every one in --house)")
     s.set_defaults(func=cmd_resume)
 
     s = sub.add_parser("discover", parents=[common], help="find HomeKit thermostats on the network")

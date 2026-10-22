@@ -46,7 +46,7 @@ async def watch(home: Home) -> None:
 
 
 async def _watch_one(home: Home, alias: str) -> None:
-    units = home.config.units
+    units, house = home.config.units, home.house(alias)
     backoff = 5
     while True:
         unsubscribe = None
@@ -55,7 +55,7 @@ async def _watch_one(home: Home, alias: str) -> None:
             pairing = home.controller.aliases[alias]
 
             def publish() -> None:
-                write_cache([thermostat_state(alias, accessories, units)])
+                write_cache([thermostat_state(alias, accessories, units, house)])
 
             def on_event(changes: dict) -> None:
                 if accessories.process_changes(changes):
@@ -85,7 +85,7 @@ async def _watch_one(home: Home, alias: str) -> None:
         except Exception as e:
             log.warning("%s: %s; retrying in %ss", alias, e, backoff)
             previous = read_cache().get("thermostats", {}).get(alias)
-            write_cache([unavailable_state(alias, str(e), previous)])
+            write_cache([unavailable_state(alias, str(e), previous, house)])
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, 120)
         finally:
