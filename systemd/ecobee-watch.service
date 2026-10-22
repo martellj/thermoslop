@@ -1,0 +1,12 @@
+[Unit]
+Description=ecobee HomeKit watcher (keeps the bar widget's state fresh)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/ecobee watch
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
