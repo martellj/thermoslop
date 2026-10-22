@@ -1,0 +1,12 @@
+[Unit]
+Description=ecobee MCP server on the tailnet (for AI clients on other machines)
+After=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/ecobee mcp --http
+# Tailscale may not be up yet at login; keep retrying.
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=default.target

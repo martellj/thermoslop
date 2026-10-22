@@ -20,6 +20,10 @@ ln -sfn "$repo/systemd/ecobee-watch.service" "$HOME/.config/systemd/user/ecobee-
 systemctl --user daemon-reload
 systemctl --user enable --now ecobee-watch.service
 echo "→ ecobee-watch.service enabled"
+# Installed but off: serving MCP over the tailnet is opt-in.
+ln -sfn "$repo/systemd/ecobee-mcp.service" "$HOME/.config/systemd/user/ecobee-mcp.service"
+systemctl --user daemon-reload
+echo "→ ecobee-mcp.service installed (off; enable with: systemctl --user enable --now ecobee-mcp)"
 
 if [[ -d $plugins ]]; then
   ln -sfn "$repo/omarchy/john.ecobee" "$plugins/john.ecobee"

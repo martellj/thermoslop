@@ -238,3 +238,39 @@ async def serve_stdio(config, read_only: bool) -> None:
     async with Home(config) as home:
         server = ThermostatServer(home, Guard(config.mcp), read_only=read_only or config.mcp.read_only)
         await server.mcp.run_stdio_async()
+
+
+async def serve_http(config, read_only: bool, bind: str | None, port: int | None) -> None:
+    """Streamable HTTP on a Tailscale address, for MCP clients elsewhere on the tailnet."""
+    import uvicorn
+    from mcp.server.transport_security import TransportSecuritySettings
+
+    from ecobee import tailnet
+
+    addresses = [bind] if bind else await tailnet.tailscale_ips()
+    for address in addresses:
+        tailnet.check_bind(address)
+    port = port or config.mcp.http_port
+    me = await tailnet.whois(addresses[0])
+    allow = config.mcp.allow or ([me["login"]] if me else [])
+    if not allow:
+        raise EcobeeError("can't tell who owns this node; set `allow` under [mcp]")
+    # Only requests addressed to this node's tailnet names, so a web page can't
+    # reach the server by rebinding its own domain to this address.
+    hosts = [tailnet.host_header(a, port) for a in addresses]
+    if me:
+        hosts += [f"{me['node']}:{port}", f"{me['fqdn']}:{port}"]
+    security = TransportSecuritySettings(allowed_hosts=hosts, allowed_origins=[])
+
+    async with Home(config) as home:
+        guard = Guard(config.mcp)
+        server = ThermostatServer(home, guard, read_only=read_only or config.mcp.read_only)
+        app = tailnet.TailnetAuth(
+            server.mcp.streamable_http_app(transport_security=security, host=addresses[0]),
+            allow,
+            on_refused=lambda who, reason: guard.record("http", {}, who, "refused", error=reason),
+        )
+        url = f"http://{me['fqdn'] if me else tailnet.host_header(addresses[0], port).rsplit(':', 1)[0]}:{port}/mcp"
+        log.warning("serving MCP on %s (%s) for %s", url, ", ".join(addresses), ", ".join(allow))
+        sockets = tailnet.listen(addresses, port)
+        await uvicorn.Server(uvicorn.Config(app, log_level="warning")).serve(sockets=sockets)

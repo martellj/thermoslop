@@ -193,7 +193,10 @@ async def cmd_watch(args, config) -> int:
 async def cmd_mcp(args, config) -> int:
     from ecobee import mcp_server
 
-    await mcp_server.serve_stdio(config, read_only=args.read_only)
+    if args.http:
+        await mcp_server.serve_http(config, read_only=args.read_only, bind=args.bind, port=args.port)
+    else:
+        await mcp_server.serve_stdio(config, read_only=args.read_only)
     return 0
 
 
@@ -260,8 +263,11 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("watch", parents=[common], help="daemon: keep the bar widget's state fresh")
     s.set_defaults(func=cmd_watch)
 
-    s = sub.add_parser("mcp", parents=[common], help="MCP server for AI clients (stdio)")
+    s = sub.add_parser("mcp", parents=[common], help="MCP server for AI clients (stdio, or --http on the tailnet)")
     s.add_argument("--read-only", action="store_true", help="offer only the status tools")
+    s.add_argument("--http", action="store_true", help="serve streamable HTTP on this machine's Tailscale address")
+    s.add_argument("--bind", help="Tailscale address to listen on (default: `tailscale ip -4`)")
+    s.add_argument("--port", type=int, help="port (default: [mcp] http_port, 8765)")
     s.set_defaults(func=cmd_mcp)
 
     s = sub.add_parser("dump", parents=[common], help="raw HomeKit accessory data (debugging)")

@@ -81,6 +81,40 @@ claude mcp add --scope user ecobee -- ~/.local/bin/ecobee mcp
 { "mcpServers": { "ecobee": { "command": "/home/you/.local/bin/ecobee", "args": ["mcp"] } } }
 ```
 
+### Other machines on your tailnet
+
+`ecobee mcp --http` serves streamable HTTP for MCP clients on other machines
+(a Mac, a laptop). Nothing is reachable from the LAN or the internet:
+
+- It listens only on this machine's Tailscale addresses, and refuses
+  `--bind 0.0.0.0` or any non-Tailscale address.
+- Each request's source is looked up with `tailscale whois`. It's answered only
+  if the user or node is in `[mcp] allow`, which defaults to this node's owner.
+  Anyone else gets 403, and the refusal is logged. There are no tokens: the
+  tailnet already vouches for the device.
+- Requests must be addressed to this node's tailnet names, and requests carrying
+  a browser `Origin` are refused, so a web page can't reach it by rebinding a
+  domain to this address.
+
+```bash
+systemctl --user enable --now ecobee-mcp    # installed by install.sh, off by default
+```
+
+```toml
+[mcp]
+http_port = 8765
+allow = ["alice@", "alices-laptop"]    # login (or prefix ending in @) or node name
+```
+
+On the other machine, point the client at `http://<node>:8765/mcp`, where
+`<node>` is this machine's MagicDNS name:
+
+```bash
+claude mcp add --scope user --transport http ecobee http://omarchy:8765/mcp
+```
+
+The audit log records these callers as `login on node`.
+
 ### Guardrails
 
 The CLI is unrestricted. Changes through MCP are checked against `[mcp]` in the
