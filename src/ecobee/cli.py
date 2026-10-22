@@ -9,7 +9,6 @@ import argparse
 import asyncio
 import json
 import logging
-import re
 import sys
 import time
 
@@ -92,15 +91,17 @@ async def cmd_pair(args, config) -> int:
         raise EcobeeError(
             f"{device.name} is already paired with another controller (Apple Home?). Remove it there first."
         )
-    pin = args.pin
-    if not pin:
-        print(f"On the {device.name} thermostat, find its HomeKit setup code (Menu → Settings → HomeKit).")
-        pin = input("HomeKit code (XXX-XX-XXX): ").strip()
-    if re.fullmatch(r"\d{8}", pin):
-        pin = f"{pin[:3]}-{pin[3:5]}-{pin[5:]}"
+    async def get_pin() -> str:
+        if args.pin:
+            return args.pin
+        print(f"Pairing started. Enter the HomeKit code {device.name} shows now", file=sys.stderr)
+        print("(it may have just changed; check the screen, Menu → Settings → HomeKit).", file=sys.stderr)
+        print("HomeKit code: ", end="", file=sys.stderr, flush=True)
+        return (await asyncio.to_thread(sys.stdin.readline)).strip()
+
     alias = args.alias or slugify(device.name)
     async with Home(config) as home:
-        await home.pair(device, alias, pin)
+        await home.pair(device, alias, get_pin)
         state = await home.state(alias)
     write_cache([state])
     emit(args, state, f"Paired {device.name} as {alias!r}.\n{format_state(state)}")

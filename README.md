@@ -21,7 +21,9 @@ ecobee pair Upstairs
 ```
 
 The HomeKit code is on the thermostat under **Menu → Settings → HomeKit**
-(the exact menu path varies with firmware). An ecobee pairs with **one**
+(the exact menu path varies with firmware). ecobee shows a **new code once
+pairing starts**, so `ecobee pair` starts first and then asks for the code
+on the screen at that moment; a code read beforehand is rejected. An ecobee pairs with **one**
 HomeKit controller, so it has to be removed from Apple Home before pairing
 here, and pairing it back to Apple Home takes it away from this box.
 

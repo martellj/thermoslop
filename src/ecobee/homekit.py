@@ -38,6 +38,14 @@ class EcobeeError(Exception):
     pass
 
 
+def format_pin(pin: str) -> str:
+    """HomeKit codes are used as XXX-XX-XXX; screens often show XXXX XXXX."""
+    digits = re.sub(r"\D", "", pin)
+    if len(digits) != 8:
+        raise EcobeeError(f"a HomeKit code has 8 digits, got {pin!r}")
+    return f"{digits[:3]}-{digits[3:5]}-{digits[5:]}"
+
+
 def slugify(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "thermostat"
 
@@ -237,12 +245,20 @@ class Home:
 
     # -- pairing --
 
-    async def pair(self, device: discovery.Device, alias: str, pin: str) -> None:
+    async def pair(self, device: discovery.Device, alias: str, get_pin) -> None:
+        """Pair, asking for the code only once the attempt has started.
+
+        Accessories with a screen (ecobee included) can show a fresh code when
+        pair-setup begins, so a code read beforehand may already be stale.
+        `get_pin` is an async callable returning the code.
+        """
         if alias in self.controller.aliases:
             raise EcobeeError(f"{alias!r} is already paired")
         ip = self.controller.transports[TransportType.IP]
+        pin = None
         try:
             finish = await IpDiscovery(ip, device.to_service()).async_start_pairing(alias)
+            pin = format_pin(await get_pin())
             pairing = await finish(pin)
         except AuthenticationError:
             raise EcobeeError(f"{device.name} rejected the HomeKit code {pin}; check the digits and try again") from None
