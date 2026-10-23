@@ -8,6 +8,15 @@ version.
 
 ## [Unreleased]
 
+### Fixed
+
+- `thermoslop setup` on distributions without a systemd user session
+  (Alpine/OpenRC, Void/runit, containers) crashed with `FileNotFoundError`.
+  It now explains how to run `thermoslop watch` under your own service
+  manager or autostart.
+- Under `python -m thermoslop`, `setup` now points services at the installed
+  `thermoslop` command.
+
 ### Added
 
 - `thermoslop bar` for other status bars: `text` (i3blocks, polybar),

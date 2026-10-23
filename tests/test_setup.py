@@ -24,6 +24,7 @@ class Recorder:
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.setattr(setup_mod, "has_systemd_user", lambda: True)
     monkeypatch.setattr(setup_mod, "executable", lambda: "/home/a b/.local/bin/thermoslop")
     monkeypatch.setattr(setup_mod.shutil, "which", lambda name: None)  # not Omarchy unless a test says so
     return tmp_path
@@ -117,3 +118,12 @@ def test_tailscale_cli_lookup(monkeypatch):
     monkeypatch.setattr(tailnet.os.path, "exists", lambda p: False)
     with pytest.raises(ThermoSlopError, match="needs Tailscale"):
         tailnet.tailscale_cli()
+
+
+def test_linux_without_systemd_explains_instead_of_crashing(home, monkeypatch):
+    monkeypatch.setattr(setup_mod, "has_systemd_user", lambda: False)
+    run = Recorder()
+    done = setup(home=home, run=run, platform="linux")
+    assert run.calls == [] and not (home / ".config/systemd").exists()
+    assert "no systemd user session" in done[0]
+    assert any('"/home/a b/.local/bin/thermoslop" watch' in line for line in done)

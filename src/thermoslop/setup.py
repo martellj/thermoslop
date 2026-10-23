@@ -40,6 +40,8 @@ def executable() -> str:
     """Absolute path of the running `thermoslop`, unresolved: a stable symlink
     such as ~/.local/bin/thermoslop survives upgrades, the target may not."""
     argv0 = sys.argv[0]
+    if argv0.endswith("__main__.py"):  # `python -m thermoslop`: point at the installed command instead
+        return shutil.which(APP) or str(Path(argv0).absolute())
     if os.sep in argv0 or (os.altsep and os.altsep in argv0):
         return str(Path(argv0).absolute())
     return shutil.which(argv0) or shutil.which(APP) or str(Path(argv0).absolute())
@@ -66,7 +68,25 @@ def _units_dir(home: Path) -> Path:
     return Path(os.environ.get("XDG_CONFIG_HOME") or home / ".config") / "systemd" / "user"
 
 
+def has_systemd_user() -> bool:
+    """A systemd user manager we can talk to (not Alpine/OpenRC, Void/runit, containers…)."""
+    return bool(shutil.which("systemctl")) and Path("/run/systemd/system").is_dir()
+
+
+def without_systemd(binary: str) -> list[str]:
+    """What to do instead, for service managers setup doesn't drive."""
+    return [
+        "no systemd user session here, so nothing was installed. Keep the watcher running with your own",
+        f"service manager or autostart; the command is: \"{binary}\" watch",
+        "  runit (Void):      a user service whose run script is: exec \"" + binary + "\" watch",
+        "  OpenRC (Alpine):   a user service (rc-update -U add), or your session's autostart",
+        "  any desktop/WM:    an autostart entry (e.g. Hyprland: exec-once = thermoslop watch)",
+    ]
+
+
 def setup_linux(home: Path, binary: str, run: Runner, remove: bool = False) -> list[str]:
+    if not has_systemd_user():
+        return [] if remove else without_systemd(binary)
     done = []
     units = _units_dir(home)
     if remove:
