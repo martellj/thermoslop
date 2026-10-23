@@ -27,11 +27,22 @@ Upstairs: 71.2°F · idle · set 67°F–75°F (auto) · home · 40% RH
 ## Install
 
 ```bash
-./install.sh                  # venv, ~/.local/bin/thermoslop, services, bar widget
+uv tool install thermoslop    # or: pipx install thermoslop
+thermoslop setup              # starts the watcher service; on Omarchy, offers the bar widget
 thermoslop discover           # lists thermostats and whether they're ready to pair
-thermoslop pair "Main Floor"  # asks for the HomeKit code shown on the thermostat
-thermoslop pair Upstairs
+thermoslop pair <device id>   # asks for the HomeKit code shown on the thermostat
 ```
+
+- **Linux:** `setup` installs systemd user services.
+- **macOS:** `setup` installs launchd agents. The CLI, watcher and MCP server
+  work there; the bar widget is Omarchy-only.
+- **Removing the services:** `thermoslop setup --remove` takes them out and
+  keeps your pairings and history.
+- **The Omarchy plugin** can also be added on its own:
+  `omarchy plugin add https://github.com/martellj/thermoslop-omarchy --enable`.
+
+From a checkout instead (for development), `./install.sh` makes an editable
+venv, runs `thermoslop setup`, and symlinks the widget from `omarchy/`.
 
 The HomeKit code is on the thermostat under **Menu → Settings → HomeKit**
 (the exact menu path varies with firmware). ecobee shows a **new code once
@@ -338,6 +349,11 @@ router makes this rarely needed.
 ~/.local/share/thermoslop/venv/bin/pip install -e '.[test]'
 ~/.local/share/thermoslop/venv/bin/python -m pytest
 ```
+
+`./install.sh` sets up a development install from the checkout.
+`scripts/check-version`, `scripts/check-dist` and `scripts/check-plugin` are
+the release checks, which CI runs too. Releases are cut with
+`scripts/release X.Y.Z`; see [RELEASING.md](RELEASING.md).
 
 Built on [aiohomekit](https://github.com/Jc2k/aiohomekit), the library behind
 Home Assistant's HomeKit Controller. ecobee's comfort settings and hold

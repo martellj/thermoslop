@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+"""Check the Omarchy plugin folder that a release copies to thermoslop-omarchy.
+
+  scripts/check-plugin [folder]      default: omarchy/martellj.thermoslop
+
+Runs `omarchy plugin validate` when it's available (on Omarchy); otherwise
+checks what that needs: a manifest with id, kinds and existing entry points.
+"""
+
+import json
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def main() -> int:
+    folder = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "omarchy" / "martellj.thermoslop"
+    if shutil.which("omarchy"):
+        return subprocess.run(["omarchy", "plugin", "validate", str(folder)]).returncode
+    manifest = json.loads((folder / "manifest.json").read_text())
+    problems = [f"manifest is missing {k}" for k in ("schemaVersion", "id", "name", "version", "kinds", "entryPoints")
+                if k not in manifest]
+    for kind, entry in manifest.get("entryPoints", {}).items():
+        if not (folder / entry).exists():
+            problems.append(f"entry point {kind}: {entry} doesn't exist")
+    for p in problems:
+        print(f"check-plugin: {p}", file=sys.stderr)
+    if not problems:
+        print(f"check-plugin: {manifest['id']} {manifest['version']} OK")
+    return 1 if problems else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

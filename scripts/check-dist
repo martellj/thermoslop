@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""Inspect built distributions before they're published.
+
+  scripts/check-dist dist/        every .whl and .tar.gz in dist/
+
+Fails if an artifact contains anything outside the allow-list (planning
+notes, editor state, backups, private files), or, when run in a clone that has
+.git/info/private-strings (the owner's machine), any of those private values.
+"""
+
+import re
+import sys
+import tarfile
+import zipfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+WHEEL_ALLOWED = [r"thermoslop/[a-z_]+\.py", r"thermoslop-[^/]+\.dist-info/.+"]
+SDIST_ALLOWED = [
+    r"src/thermoslop/[a-z_]+\.py", r"src/thermoslop\.egg-info/.+", r"tests/[a-z_]+\.py",
+    r"(README\.md|LICENSE|CHANGELOG\.md|SECURITY\.md|pyproject\.toml|setup\.cfg|PKG-INFO)",
+]
+FORBIDDEN = re.compile(r"(^|/)(openspec|\.claude|\.git|scratch|__pycache__)(/|$)|\.bundle$|pairing\.json|changes\.jsonl")
+
+
+def members(path: Path) -> dict[str, bytes]:
+    if path.suffix == ".whl":
+        with zipfile.ZipFile(path) as z:
+            return {n: z.read(n) for n in z.namelist() if not n.endswith("/")}
+    with tarfile.open(path) as t:
+        out = {}
+        for m in t.getmembers():
+            if m.isfile():
+                name = m.name.split("/", 1)[1] if "/" in m.name else m.name  # drop thermoslop-X.Y.Z/
+                out[name] = t.extractfile(m).read()
+        return out
+
+
+def private_patterns() -> re.Pattern | None:
+    listing = ROOT / ".git" / "info" / "private-strings"
+    if not listing.exists():
+        return None
+    lines = [l for l in listing.read_text().splitlines() if l.strip() and not l.startswith("#")]
+    return re.compile("|".join(f"(?:{l})" for l in lines), re.I) if lines else None
+
+
+def check(path: Path, private: re.Pattern | None) -> list[str]:
+    allowed = [re.compile(p) for p in (WHEEL_ALLOWED if path.suffix == ".whl" else SDIST_ALLOWED)]
+    problems = []
+    files = members(path)
+    for name, data in files.items():
+        if FORBIDDEN.search(name) or not any(p.fullmatch(name) for p in allowed):
+            problems.append(f"{path.name}: unexpected file {name}")
+        elif private and private.search(data.decode("utf-8", "replace")):
+            problems.append(f"{path.name}: {name} contains a private value")
+    if not any(n.endswith("cli.py") for n in files):
+        problems.append(f"{path.name}: thermoslop/cli.py is missing")
+    return problems
+
+
+def main() -> int:
+    dist = Path(sys.argv[1] if len(sys.argv) > 1 else "dist")
+    artifacts = sorted(dist.glob("*.whl")) + sorted(dist.glob("*.tar.gz"))
+    if len(artifacts) < 2:
+        print(f"check-dist: expected a wheel and an sdist in {dist}", file=sys.stderr)
+        return 1
+    private = private_patterns()
+    problems = [p for a in artifacts for p in check(a, private)]
+    for p in problems:
+        print(p, file=sys.stderr)
+    if problems:
+        return 1
+    note = "" if private else " (no private-strings list here; run on the owner's machine too)"
+    print(f"check-dist: {', '.join(a.name for a in artifacts)} OK{note}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

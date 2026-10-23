@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+"""Cut a release: scripts/release X.Y.Z
+
+Refuses unless on a clean `main` that matches origin and the tests pass. Then:
+1. sets X.Y.Z in __init__.py, the plugin manifest and the widget's requiredVersion
+2. turns CHANGELOG.md's "Unreleased" section into "X.Y.Z - <date>"
+3. builds the wheel and sdist and runs scripts/check-dist on them (with the
+   private-strings scan, which only this machine can do) and scripts/check-plugin
+4. commits "Release vX.Y.Z" and creates the annotated tag vX.Y.Z
+
+It never pushes. Review, then: git push --follow-tags
+Options: --no-fetch (skip comparing with origin, for dry runs in a scratch clone).
+"""
+
+import datetime
+import json
+import re
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+INIT = ROOT / "src/thermoslop/__init__.py"
+MANIFEST = ROOT / "omarchy/martellj.thermoslop/manifest.json"
+QML = ROOT / "omarchy/martellj.thermoslop/ThermoSlop.qml"
+CHANGELOG = ROOT / "CHANGELOG.md"
+
+
+def sh(*cmd, check=True, **kw) -> str:
+    out = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, **kw)
+    if check and out.returncode != 0:
+        fail(f"`{' '.join(map(str, cmd))}` failed:\n{out.stdout}{out.stderr}")
+    return out.stdout.strip()
+
+
+def fail(msg: str) -> None:
+    print(f"release: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+def numbers(v: str) -> tuple[int, ...]:
+    return tuple(map(int, v.split(".")))
+
+
+def main() -> None:
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    if len(args) != 1 or not re.fullmatch(r"\d+\.\d+\.\d+", args[0]):
+        fail("usage: scripts/release X.Y.Z [--no-fetch]")
+    version = args[0]
+    current = re.search(r'__version__ = "([^"]+)"', INIT.read_text()).group(1)
+    if numbers(version) <= numbers(current):
+        fail(f"{version} isn't newer than {current}")
+
+    if sh("git", "rev-parse", "--abbrev-ref", "HEAD") != "main":
+        fail("not on main")
+    if sh("git", "status", "--porcelain"):
+        fail("working tree isn't clean")
+    if "--no-fetch" not in sys.argv:
+        sh("git", "fetch", "--quiet", "origin")
+        if sh("git", "rev-parse", "HEAD") != sh("git", "rev-parse", "origin/main"):
+            fail("main differs from origin/main; pull or push first")
+    if sh("git", "tag", "--list", f"v{version}"):
+        fail(f"tag v{version} already exists")
+
+    changelog = CHANGELOG.read_text()
+    unreleased = re.search(r"## \[Unreleased\]\n(.*?)(?=\n## )", changelog, re.S)
+    if not unreleased or not unreleased.group(1).strip():
+        fail("CHANGELOG.md has nothing under ## [Unreleased]")
+
+    print("release: running the tests…")
+    sh(sys.executable, "-m", "pytest", "-q")
+
+    INIT.write_text(re.sub(r'__version__ = "[^"]+"', f'__version__ = "{version}"', INIT.read_text()))
+    manifest = json.loads(MANIFEST.read_text())
+    manifest["version"] = version
+    MANIFEST.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+    QML.write_text(re.sub(r'(property string requiredVersion: )"[^"]+"', rf'\1"{version}"', QML.read_text()))
+    today = datetime.date.today().isoformat()
+    CHANGELOG.write_text(changelog.replace("## [Unreleased]\n", f"## [Unreleased]\n\n## [{version}] - {today}\n", 1))
+    sh(sys.executable, str(ROOT / "scripts/check-version"), f"v{version}")
+
+    with tempfile.TemporaryDirectory() as dist:
+        print("release: building and checking the artifacts…")
+        sh(sys.executable, "-m", "build", "--outdir", dist)
+        sh(sys.executable, str(ROOT / "scripts/check-dist"), dist)
+    sh(sys.executable, str(ROOT / "scripts/check-plugin"))
+
+    sh("git", "add", str(INIT), str(MANIFEST), str(QML), str(CHANGELOG))
+    sh("git", "commit", "-q", "-m", f"Release v{version}")
+    sh("git", "tag", "-a", f"v{version}", "-m", f"ThermoSlop {version}")
+    print(f"release: committed and tagged v{version}. Review it, then: git push --follow-tags")
+
+
+if __name__ == "__main__":
+    main()

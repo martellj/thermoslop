@@ -1,0 +1,143 @@
+# Publishes a release when a vX.Y.Z tag is pushed (made by scripts/release).
+# Every publish step skips what already exists, so a failed run can simply be
+# re-run. Run it by hand (workflow_dispatch) to build and verify without
+# publishing anything.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e '.[test]'
+      - run: python -m pytest -q
+      - run: python scripts/check-version ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - run: python -m pip install build
+      - run: python -m build
+      - run: python scripts/check-dist dist
+      - run: python scripts/check-plugin
+      - name: Scan the artifacts for secrets
+        run: |
+          v=8.30.1
+          curl -sSLO "https://github.com/gitleaks/gitleaks/releases/download/v$v/gitleaks_${v}_linux_x64.tar.gz"
+          curl -sSLO "https://github.com/gitleaks/gitleaks/releases/download/v$v/gitleaks_${v}_checksums.txt"
+          grep "linux_x64.tar.gz" "gitleaks_${v}_checksums.txt" | sha256sum -c -
+          tar xzf "gitleaks_${v}_linux_x64.tar.gz" gitleaks
+          mkdir unpacked && (cd unpacked && for f in ../dist/*.tar.gz; do tar xzf "$f"; done && for f in ../dist/*.whl; do python -m zipfile -e "$f" wheel; done)
+          ./gitleaks dir --no-banner --redact unpacked
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dist
+          path: dist/
+
+  smoke:
+    needs: build
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        artifact: ["*.whl", "*.tar.gz"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dist
+          path: dist
+      - name: Install into a clean venv and try it
+        run: |
+          python -m venv "$RUNNER_TEMP/v"
+          "$RUNNER_TEMP/v/bin/pip" install dist/${{ matrix.artifact }}
+          export PATH="$RUNNER_TEMP/v/bin:$PATH"
+          thermoslop --version
+          thermoslop --help > /dev/null
+          thermoslop discover --demo
+          echo 314-15-926 | thermoslop pair Basement --demo
+
+  pypi:
+    if: github.ref_type == 'tag'
+    needs: smoke
+    runs-on: ubuntu-latest
+    environment: pypi          # requires the owner's approval
+    permissions:
+      id-token: write          # trusted publishing; no stored token
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@76f52bc884231f62b9a034ebfe128415bbaabdfc # v1.12.4
+        with:
+          skip-existing: true
+
+  github-release:
+    needs: pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dist
+          path: dist
+      - name: Create the release (skipped if it exists)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          awk -v h="## [$version]" 'index($0, h) == 1 {on = 1; next} /^## / {on = 0} on' CHANGELOG.md > notes.md
+          gh release view "$TAG" > /dev/null 2>&1 || gh release create "$TAG" dist/* --title "ThermoSlop $version" --notes-file notes.md
+
+  plugin:
+    needs: pypi
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Copy the plugin to martellj/thermoslop-omarchy (skipped if the tag exists)
+        env:
+          DEPLOY_KEY: ${{ secrets.PLUGIN_DEPLOY_KEY }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          install -m 600 /dev/null "$RUNNER_TEMP/key" && printf '%s\n' "$DEPLOY_KEY" > "$RUNNER_TEMP/key"
+          export GIT_SSH_COMMAND="ssh -i $RUNNER_TEMP/key -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
+          git clone git@github.com:martellj/thermoslop-omarchy.git plugin-repo
+          cd plugin-repo
+          if git rev-parse -q --verify "refs/tags/$TAG" > /dev/null; then echo "already released"; exit 0; fi
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -r ../omarchy/martellj.thermoslop/. . && cp ../LICENSE .
+          python3 ../scripts/check-plugin .
+          git config user.name "John Martell"
+          git config user.email "602586+martellj@users.noreply.github.com"
+          git add -A && git commit -m "Release $TAG" && git tag -a "$TAG" -m "ThermoSlop ${TAG#v}"
+          git push origin HEAD:main "$TAG"
+          rm -f "$RUNNER_TEMP/key"
