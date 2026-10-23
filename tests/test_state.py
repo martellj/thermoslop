@@ -1,3 +1,4 @@
+import pytest
 from aiohomekit.model import Accessories, Accessory
 from aiohomekit.model.characteristics import CharacteristicsTypes as CT
 from aiohomekit.model.services import ServicesTypes as ST
@@ -102,18 +103,60 @@ def test_status_groups_by_house():
     assert format_states([home]).startswith("Main Floor:")
 
 
-def test_history_samples_every_5_minutes_for_6_hours(tmp_path, monkeypatch):
+def _readings(hk, hours_of_data, trend_hours, t0=1_000_000):
+    for minute in range(0, int(hours_of_data * 60)):  # a reading every minute
+        hk.write_cache(
+            [{"alias": "upstairs", "available": True, "temperature": 70 + minute / 60, "updated_at": t0 + minute * 60}],
+            trend_hours=trend_hours,
+        )
+    return hk.read_cache()
+
+
+@pytest.fixture
+def hk(tmp_path, monkeypatch):
     import thermoslop.homekit as hk
 
     monkeypatch.setattr(hk, "STATE_FILE", tmp_path / "state.json")
-    t0 = 1_000_000
-    for minute in range(0, 7 * 60, 1):  # a reading every minute for 7 hours
-        hk.write_cache([{"alias": "upstairs", "available": True, "temperature": 70 + minute / 60, "updated_at": t0 + minute * 60}])
-    series = hk.read_cache()["history"]["upstairs"]
+    return hk
+
+
+def test_history_samples_every_5_minutes_within_the_window(hk):
+    cache = _readings(hk, 7, trend_hours=6)
+    series = cache["history"]["upstairs"]
     assert all(b[0] - a[0] == 300 for a, b in zip(series, series[1:]))
     assert series[-1][0] - series[0][0] < 6 * 3600 and len(series) == 72
-    assert "history" not in hk.read_cache()["thermostats"]["upstairs"]
-    hk.write_cache([{"alias": "upstairs", "available": False, "updated_at": t0 + 8 * 3600}])
-    assert len(hk.read_cache()["history"]["upstairs"]) == 72  # unavailable readings aren't recorded
+    assert cache["trend_hours"] == 6
+    assert "history" not in cache["thermostats"]["upstairs"]
+
+
+def test_history_default_window_is_24_hours(hk, tmp_path):
+    from thermoslop.config import load_config
+
+    (tmp_path / "config.toml").write_text("")
+    hours = load_config(tmp_path / "config.toml").trend_hours
+    assert hours == 24
+    assert len(_readings(hk, 25, trend_hours=hours)["history"]["upstairs"]) == 288
+
+
+def test_history_only_recorded_by_the_watcher(hk):
+    hk.write_cache([{"alias": "upstairs", "available": True, "temperature": 70, "updated_at": 1}])  # CLI write
+    assert "history" not in hk.read_cache()
+    _readings(hk, 1, trend_hours=24)
+    hk.write_cache([{"alias": "upstairs", "available": False, "updated_at": 10**7}], trend_hours=24)
+    assert len(hk.read_cache()["history"]["upstairs"]) == 12  # unavailable readings aren't recorded
     hk.write_cache([], remove=["upstairs"])
     assert "upstairs" not in hk.read_cache()["history"]
+
+
+def test_trend_off_drops_history(hk):
+    _readings(hk, 1, trend_hours=24)
+    cache = _readings(hk, 1, trend_hours=0, t0=2_000_000)
+    assert "history" not in cache and cache["trend_hours"] == 0
+
+
+def test_trend_hours_validated(tmp_path):
+    from thermoslop.config import load_config
+
+    (tmp_path / "config.toml").write_text("trend_hours = 1000\n")
+    with pytest.raises(ValueError, match="trend_hours"):
+        load_config(tmp_path / "config.toml")

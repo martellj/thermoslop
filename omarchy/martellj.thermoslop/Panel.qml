@@ -1,5 +1,5 @@
 // The ThermoSlop panel: a header, one card per thermostat (ring gauge,
-// temperature, setpoint +/-, 6-hour trend) and a mode bar. Data comes from the
+// temperature, setpoint +/-, temperature trend) and a mode bar. Data comes from the
 // bar widget (hostWidget), which reads the watcher's cache file. Changes run the
 // `thermoslop` CLI, so they go through the same code as the terminal.
 //
@@ -22,6 +22,7 @@ Panel {
   readonly property var zones: hostWidget ? hostWidget.shown : []
   readonly property var live: hostWidget ? hostWidget.live : []
   readonly property var history: hostWidget ? hostWidget.history : ({})
+  readonly property real trendHours: hostWidget ? hostWidget.trendHours : 24
   readonly property real now: hostWidget ? hostWidget.now : Date.now() / 1000
   readonly property bool multiHouse: hostWidget ? hostWidget.houses.length > 1 : false
 
@@ -434,13 +435,15 @@ Panel {
                   // trend + delta
                   Item {
                     width: parent.width
+                    visible: root.trendHours > 0 || deltaText.text !== ""
                     height: Math.max(trendLabel.implicitHeight, Style.space(20))
 
                     Text {
                       id: trendLabel
                       anchors.left: parent.left
                       anchors.verticalCenter: parent.verticalCenter
-                      text: "6H TREND"
+                      visible: root.trendHours > 0
+                      text: Number(root.trendHours.toFixed(1)) + "H TREND"
                       color: root.dim
                       font.family: root.font
                       font.pixelSize: Style.font.caption
@@ -448,6 +451,7 @@ Panel {
                     }
 
                     Sparkline {
+                      visible: root.trendHours > 0
                       anchors.left: trendLabel.right
                       anchors.leftMargin: Style.space(12)
                       anchors.right: deltaText.left
@@ -687,7 +691,7 @@ Panel {
     }
   }
 
-  // The last 6 hours of temperatures, with a dot on the latest.
+  // The trend window's temperatures (trend_hours), with a dot on the latest.
   component Sparkline: Item {
     id: spark
     property var points: []

@@ -130,6 +130,8 @@ class Config:
     units: str | None = None
     # Seconds between full polls in `thermoslop watch` (events arrive in between).
     poll_interval: int = 60
+    # Hours of temperature history the watcher keeps for the widget's trend line; 0 turns it off.
+    trend_hours: float = 24
     mcp: McpConfig = field(default_factory=McpConfig)
 
     def house_of(self, address: str | None) -> str | None:
@@ -140,6 +142,13 @@ class Config:
             if any(ip in ipaddress.ip_network(s, strict=False) for s in subnets):
                 return house
         return None
+
+
+def _trend_hours(value) -> float:
+    hours = float(value)
+    if not 0 <= hours <= 24 * 7:
+        raise ValueError(f"trend_hours must be between 0 and 168, got {value!r}")
+    return hours
 
 
 def _mcp(raw: dict) -> McpConfig:
@@ -164,5 +173,6 @@ def load_config(path: Path = CONFIG_FILE) -> Config:
         default=raw.get("default"),
         units=units.upper() if units else None,
         poll_interval=int(raw.get("poll_interval", 60)),
+        trend_hours=_trend_hours(raw.get("trend_hours", 24)),
         mcp=_mcp(raw.get("mcp", {})),
     )

@@ -29,6 +29,8 @@ BarWidget {
 
   property var thermostats: []
   property var history: ({})
+  // The watcher's [trend_hours] (config.toml); 0 = no trend line.
+  property real trendHours: 24
   property real updatedAt: 0
   property real now: Date.now() / 1000
   property int pendingDelta: 0
@@ -49,6 +51,7 @@ BarWidget {
       root.thermostats = Object.keys(stats).map(k => stats[k])
         .sort((a, b) => (a.house || "").localeCompare(b.house || "") || a.alias.localeCompare(b.alias))
       root.history = cache.history || {}
+      root.trendHours = cache.trend_hours ?? 24
       root.updatedAt = cache.updated_at || 0
     } catch (e) {
       // Mid-write reads can't happen (the file is replaced atomically), so a

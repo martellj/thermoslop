@@ -163,7 +163,7 @@ when every thermostat is away) and each thermostat's temperature.
 - **left click**: the ThermoSlop panel, with one card per thermostat:
   - temperature on a ring gauge, and humidity
   - a SET box with − / + (presses are batched and sent together)
-  - a 6-hour trend line, and how far the room is from its target
+  - a trend line (24 hours by default), and how far the room is from its target
 
   The mode bar along the bottom (heat, cool, eco = away, hold = resume the
   schedule) acts on every thermostat the panel shows. Colors come from your
@@ -174,8 +174,10 @@ when every thermostat is away) and each thermostat's temperature.
 
 It reads `~/.cache/thermoslop/state.json`, which `thermoslop watch` keeps
 current with HomeKit event subscriptions. The watcher also records one
-temperature per thermostat every 5 minutes for the trend line, kept for 6
-hours. The widget never polls the thermostats itself, and dims when the data
+temperature per thermostat every 5 minutes for the trend line, kept for
+`trend_hours` (24 by default; 0 turns the trend off). Each point is a real
+reading, not an average, and gaps while a thermostat is unreachable are drawn
+straight across. The widget never polls the thermostats itself, and dims when the data
 is more than 10 minutes old.
 
 To show or control just one thermostat, set `"thermostat": "upstairs"` on its
@@ -194,6 +196,7 @@ subnets = ["192.168.1.0/24"]  # unicast discovery fallback (see below)
 default = "main-floor"         # thermostat for commands without -t
 units = "F"                    # override each thermostat's display units
 poll_interval = 60             # watcher's full refresh, between events
+trend_hours = 24               # widget trend line window, up to 168; 0 = off
 
 [houses]                       # optional; subnets here are scanned too
 home = ["192.168.1.0/24"]

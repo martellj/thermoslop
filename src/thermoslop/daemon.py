@@ -47,6 +47,7 @@ async def watch(home: Home) -> None:
 
 async def _watch_one(home: Home, alias: str) -> None:
     units, house = home.config.units, home.house(alias)
+    trend_hours = home.config.trend_hours
     backoff = 5
     while True:
         unsubscribe = None
@@ -55,7 +56,7 @@ async def _watch_one(home: Home, alias: str) -> None:
             pairing = home.controller.aliases[alias]
 
             def publish() -> None:
-                write_cache([thermostat_state(alias, accessories, units, house)])
+                write_cache([thermostat_state(alias, accessories, units, house)], trend_hours=trend_hours)
 
             def on_event(changes: dict) -> None:
                 if accessories.process_changes(changes):

@@ -198,12 +198,12 @@ def read_cache() -> dict:
 
 
 # Temperature history for the widget's trend line: one sample per 5 minutes,
-# kept for 6 hours. Stored beside the states, so `status --json` stays lean.
+# kept for `trend_hours` (config). Only the watcher records it. Stored beside
+# the states, so `status --json` stays lean.
 HISTORY_STEP = 300
-HISTORY_SPAN = 6 * 3600
 
 
-def _record_history(cache: dict, state: dict) -> None:
+def _record_history(cache: dict, state: dict, hours: float) -> None:
     if not state.get("available") or state.get("temperature") is None:
         return
     series = cache.setdefault("history", {}).setdefault(state["alias"], [])
@@ -211,15 +211,21 @@ def _record_history(cache: dict, state: dict) -> None:
     if series and now - series[-1][0] < HISTORY_STEP:
         return
     series.append([round(now), state["temperature"]])
-    series[:] = [point for point in series if point[0] > now - HISTORY_SPAN]
+    series[:] = [point for point in series if point[0] > now - hours * 3600]
 
 
-def write_cache(states: list[dict], remove: list[str] = ()) -> None:
+def write_cache(states: list[dict], remove: list[str] = (), trend_hours: float | None = None) -> None:
+    """`trend_hours` (the watcher's): record history for the trend line; 0 drops it."""
     cache = read_cache()
     thermostats = cache.setdefault("thermostats", {})
+    if trend_hours is not None:
+        cache["trend_hours"] = trend_hours
+        if not trend_hours:
+            cache.pop("history", None)
     for state in states:
         thermostats[state["alias"]] = state
-        _record_history(cache, state)
+        if trend_hours:
+            _record_history(cache, state, trend_hours)
     for alias in remove:
         thermostats.pop(alias, None)
         cache.get("history", {}).pop(alias, None)
