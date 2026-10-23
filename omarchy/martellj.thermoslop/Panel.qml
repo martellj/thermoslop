@@ -34,6 +34,12 @@ Panel {
 
   // Setpoint +/- presses, per alias, sent together once clicking stops.
   property var pending: ({})
+  // Setpoints sent but not yet reported back by the watcher, per alias:
+  // {target} or {heat, cool}, plus `until`. That thermostat's buttons stay
+  // locked meanwhile, so presses never stack on a value the thermostat hasn't
+  // confirmed (an ecobee reports the old value for a few seconds).
+  property var inflight: ({})
+  readonly property int confirmMs: 20000
 
   readonly property color fg: Color.popups.text
   readonly property color accent: Color.accent
@@ -71,12 +77,46 @@ Panel {
     return root.dim
   }
 
-  function setpointText(t) {
+  // What the box shows: the value on its way, else the reported one plus
+  // presses not sent yet.
+  function wanted(t) {
+    const f = root.inflight[t.alias]
+    if (f) return f
     const d = root.pending[t.alias] || 0
-    if (t.mode === "auto") return num(t.heat_setpoint + d) + "–" + num(t.cool_setpoint + d) + "°"
-    if (t.mode === "off" || t.target === null || t.target === undefined) return "OFF"
-    return num(t.target + d) + "°" + t.units
+    if (t.mode === "auto") return { heat: t.heat_setpoint + d, cool: t.cool_setpoint + d }
+    return { target: t.target === null || t.target === undefined ? null : t.target + d }
   }
+
+  function setpointText(t) {
+    if (t.mode === "off" || (t.mode !== "auto" && (t.target === null || t.target === undefined))) return "OFF"
+    const w = root.wanted(t)
+    if (t.mode === "auto") return num(w.heat) + "–" + num(w.cool) + "°"
+    return num(w.target) + "°" + t.units
+  }
+
+  // Adjust only from a fresh reading, and not while a change is unconfirmed.
+  function adjustable(t) {
+    return root.cliOk && t.available && t.mode !== "off" && !root.inflight[t.alias]
+      && root.live.some(l => l.alias === t.alias)
+  }
+
+  // Drop in-flight values the watcher has reported back, or that timed out
+  // (the box then shows whatever the thermostat really has).
+  function reconcile() {
+    const next = {}
+    let changed = false
+    for (const alias of Object.keys(root.inflight)) {
+      const f = root.inflight[alias]
+      const t = root.zones.find(z => z.alias === alias)
+      const close = (a, b) => a !== null && a !== undefined && Math.abs(a - b) < 0.3
+      const done = !t || Date.now() > f.until || (f.target !== undefined
+        ? close(t.target, f.target) : close(t.heat_setpoint, f.heat) && close(t.cool_setpoint, f.cool))
+      if (done) changed = true
+      else next[alias] = f
+    }
+    if (changed) root.inflight = next
+  }
+  onZonesChanged: reconcile()
 
   // Positive when the room is warmer than the target (heat) or cooler (cool):
   // the thermostat has nothing to do.
@@ -101,8 +141,9 @@ Panel {
     return "IDLE"
   }
 
-  function nudge(alias, step) {
-    if (!root.cliOk) return
+  function nudge(t, step) {
+    if (!root.adjustable(t)) return
+    const alias = t.alias
     const next = Object.assign({}, root.pending)
     next[alias] = (next[alias] || 0) + step
     if (next[alias] === 0) delete next[alias]
@@ -127,21 +168,32 @@ Panel {
   Timer {
     id: sendPending
     interval: 900
+    // Absolute values, so the thermostat ends up at exactly what the box showed
+    // even if it hasn't caught up with an earlier change.
     onTriggered: {
-      const commands = Object.keys(root.pending).map(alias => {
-        const d = root.pending[alias]
-        return root.cli + " set " + (d > 0 ? "+" : "") + d + " -t " + Util.shellQuote(alias)
-      })
+      const commands = []
+      const sent = Object.assign({}, root.inflight)
+      const fmt = v => String(Math.round(v * 10) / 10)
+      for (const alias of Object.keys(root.pending)) {
+        const t = root.zones.find(z => z.alias === alias)
+        if (!t || !t.available) continue
+        const w = root.wanted(t)
+        const args = t.mode === "auto" ? "set --heat " + fmt(w.heat) + " --cool " + fmt(w.cool) : "set " + fmt(w.target)
+        commands.push(root.cli + " " + args + " -t " + Util.shellQuote(alias))
+        sent[alias] = Object.assign({ until: Date.now() + root.confirmMs }, w)
+      }
+      root.inflight = sent
+      root.pending = ({})
       if (commands.length) root.run(commands.join("; "))
-      // Keep showing the pending value until the watcher reports the change.
-      clearPending.restart()
     }
   }
 
+  // Also expires in-flight values when no update arrives at all.
   Timer {
-    id: clearPending
-    interval: 4000
-    onTriggered: root.pending = ({})
+    interval: 1000
+    repeat: true
+    running: Object.keys(root.inflight).length > 0
+    onTriggered: root.reconcile()
   }
 
   // ---- adding a thermostat. Runs `thermoslop discover --json` and
@@ -581,7 +633,7 @@ Panel {
 
                         Text {
                           anchors.right: parent.right
-                          text: "SET (" + (zone.t.mode || "—").toUpperCase() + ")"
+                          text: root.inflight[zone.t.alias] ? "SYNCING…" : "SET (" + (zone.t.mode || "—").toUpperCase() + ")"
                           color: root.dim
                           font.family: root.font
                           font.pixelSize: Style.font.caption
@@ -589,16 +641,16 @@ Panel {
                         }
                         Row {
                           spacing: Style.space(10)
-                          readonly property bool adjustable: zone.t.available && zone.t.mode !== "off"
+                          readonly property bool adjustable: root.adjustable(zone.t)
                           StepButton {
                             text: "−"
                             enabled: parent.adjustable
-                            onClicked: root.nudge(zone.t.alias, -1)
+                            onClicked: root.nudge(zone.t, -1)
                           }
                           Text {
                             anchors.verticalCenter: parent.verticalCenter
                             text: root.setpointText(zone.t)
-                            color: root.pending[zone.t.alias] ? root.accent : root.fg
+                            color: root.pending[zone.t.alias] || root.inflight[zone.t.alias] ? root.accent : root.fg
                             font.family: root.font
                             font.pixelSize: Style.font.heading
                             font.bold: true
@@ -606,7 +658,7 @@ Panel {
                           StepButton {
                             text: "+"
                             enabled: parent.adjustable
-                            onClicked: root.nudge(zone.t.alias, 1)
+                            onClicked: root.nudge(zone.t, 1)
                           }
                         }
                       }

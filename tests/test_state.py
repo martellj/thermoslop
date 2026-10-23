@@ -179,3 +179,47 @@ def test_mdns_skips_tunnel_and_loopback_interfaces(monkeypatch):
     assert lan_interfaces() == ["192.168.1.248"]
     monkeypatch.setattr(ifaddr, "get_adapters", lambda: [adapter("utun4", "100.100.100.100")])
     assert lan_interfaces() is None  # nothing usable: let zeroconf decide
+
+
+def test_changes_to_one_thermostat_run_one_at_a_time(tmp_path, monkeypatch):
+    # Overlapping `set +1`s both started from the value the thermostat reported
+    # before either write landed; the second must wait for the first to settle.
+    import asyncio
+
+    import thermoslop.homekit as hk
+
+    monkeypatch.setattr(hk, "STATE_FILE", tmp_path / "state.json")
+    order = []
+
+    async def change(name, alias="cabin"):
+        async with hk.one_change_at_a_time(alias):
+            order.append(f"{name} start")
+            await asyncio.sleep(0.3)
+            order.append(f"{name} end")
+
+    async def main():
+        await asyncio.gather(change("a"), change("b"), change("other", alias="upstairs"))
+
+    asyncio.run(main())
+    a_or_b = [o for o in order if not o.startswith("other")]
+    assert a_or_b in (["a start", "a end", "b start", "b end"], ["b start", "b end", "a start", "a end"])
+    assert order.index("other start") < order.index("a end") or order.index("other start") < order.index("b end")
+
+
+def test_change_lock_gives_up(tmp_path, monkeypatch):
+    import asyncio
+
+    import pytest
+
+    import thermoslop.homekit as hk
+
+    monkeypatch.setattr(hk, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(hk, "LOCK_WAIT", 0.3)
+
+    async def main():
+        async with hk.one_change_at_a_time("cabin"):
+            with pytest.raises(hk.ThermoSlopError, match="still being confirmed"):
+                async with hk.one_change_at_a_time("cabin"):
+                    pass
+
+    asyncio.run(main())

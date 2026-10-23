@@ -23,6 +23,14 @@ version.
   stopped. `thermoslop bar` makes the same distinction, and the zones pill
   says OFFLINE rather than IDLE.
 - A long status line in the panel header no longer runs under the zones pill.
+- Setpoint − / + in the panel (and scrolling on the bar) could overshoot.
+  They sent relative changes, which the thermostat applied to the value it
+  still reported from before the last change, and the panel stopped showing
+  a pending change after 4 seconds even if it hadn't landed. The panel now
+  sends the exact temperature it shows, and locks that thermostat's buttons
+  ("SYNCING…") until the watcher reports the new value.
+- Changes to one thermostat from several ThermoSlop processes (panel, CLI,
+  SwiftBar, MCP) now run one at a time, each starting from a confirmed value.
 - `thermoslop setup` on distributions without a systemd user session
   (Alpine/OpenRC, Void/runit, containers) crashed with `FileNotFoundError`.
   It now explains how to run `thermoslop watch` under your own service

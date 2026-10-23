@@ -5,7 +5,8 @@
 //   left click    open the panel (cards per thermostat, setpoint +/-, modes)
 //   right click   away hold on every thermostat, or resume the schedule if away
 //   middle click  resume the schedule (clear holds)
-//   scroll        nudge the setpoint by 1°, sent once scrolling stops
+//   scroll        nudge the setpoint by 1°, sent once scrolling stops; locked
+//                 until the thermostat reports the new value
 //
 // Optional settings on the widget's entry in shell.json:
 //   "thermostat": "upstairs"   show / control only this one
@@ -74,7 +75,6 @@ BarWidget {
   property real trendHours: 24
   property real updatedAt: 0
   property real now: Date.now() / 1000
-  property int pendingDelta: 0
 
   readonly property var shown: thermostats.filter(t => (!only || t.alias === only) && (!house || t.house === house))
   readonly property var houses: [...new Set(shown.map(t => t.house || ""))]
@@ -84,6 +84,9 @@ BarWidget {
   readonly property bool watcherLive: now - updatedAt < staleSeconds
   readonly property string scrollTarget: only || (shown.length ? shown[0].alias : "")
   readonly property bool anyAway: live.some(t => t.comfort === "away")
+  // Scroll goes through the panel's setpoint batching, which sends absolute
+  // values and locks until the thermostat confirms; this is its unsent part.
+  readonly property int pendingDelta: panel && scrollTarget ? (panel.pending[scrollTarget] || 0) : 0
   // `--all`, `--all --house cabin` or `-t upstairs`: what the bar's actions act on.
   readonly property string scope: only ? "-t " + Util.shellQuote(only)
     : house ? "--all --house " + Util.shellQuote(house) : "--all"
@@ -184,18 +187,6 @@ BarWidget {
     }
   }
 
-  Timer {
-    id: sendDelta
-    interval: 900
-    onTriggered: {
-      if (root.pendingDelta && root.scrollTarget) {
-        const d = root.pendingDelta
-        root.thermoslop("set " + (d > 0 ? "+" : "") + d + " -t " + Util.shellQuote(root.scrollTarget))
-      }
-      root.pendingDelta = 0
-    }
-  }
-
   // Also shown without any thermostats when the CLI is missing or too old, so
   // the panel can say how to fix it.
   visible: shown.length > 0 || cliState === "missing" || cliState === "outdated"
@@ -220,9 +211,8 @@ BarWidget {
     }
 
     onWheelMoved: function(delta) {
-      if (!root.live.length || !root.cliOk) return
-      root.pendingDelta += delta > 0 ? 1 : -1
-      sendDelta.restart()
+      const t = root.shown.find(z => z.alias === root.scrollTarget)
+      if (t && panelLoader.item) panelLoader.item.nudge(t, delta > 0 ? 1 : -1)
     }
   }
 }

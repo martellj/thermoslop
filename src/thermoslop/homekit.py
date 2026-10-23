@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import fcntl
 import json
 import logging
 import os
@@ -240,6 +242,37 @@ def _record_history(cache: dict, state: dict, hours: float) -> None:
     series[:] = [point for point in series if point[0] > now - hours * 3600]
 
 
+@contextlib.asynccontextmanager
+async def one_change_at_a_time(alias: str):
+    """Serialize changes to one thermostat across every ThermoSlop process.
+
+    A thermostat reports the old value for a few seconds after a write, so two
+    overlapping `set +1`s would both start from it. Each change holds this lock
+    until its result is confirmed (or confirmation gives up), so the next one
+    reads a settled value.
+    """
+    lock_file = private_dir(STATE_FILE.parent) / f"change-{alias}.lock"
+    fd = os.open(lock_file, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        # Polled, not blocking in a thread: a cancelled wait must not leave a
+        # thread behind that takes the lock later and never lets go.
+        deadline = time.monotonic() + LOCK_WAIT
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() > deadline:
+                    raise ThermoSlopError(f"{alias}: another change is still being confirmed; try again") from None
+                await asyncio.sleep(0.2)
+        yield
+    finally:
+        os.close(fd)  # releases the lock
+
+
+LOCK_WAIT = 45  # a change holds the lock for its write plus up to 8 s of confirming
+
+
 def write_cache(states: list[dict], remove: list[str] = (), trend_hours: float | None = None) -> None:
     """`trend_hours` (the watcher's): record history for the trend line; 0 drops it."""
     cache = read_cache()
@@ -431,32 +464,37 @@ class Home:
 
         Temperatures are in the thermostat's display units, or in `unit` ("F"/"C").
         """
-        accessories = await self.fetch(alias)
-        st = thermostat_state(alias, accessories, self.config.units, self.house(alias))
-        value, heat, cool = convert_request(st, value, relative, heat, cool, unit)
-        plan = plan_setpoints(st, value, relative=relative, heat=heat, cool=cool)
-        if check:
-            check(st, plan)
-        chars = {"target": CT.TEMPERATURE_TARGET, "heat": CT.TEMPERATURE_HEATING_THRESHOLD, "cool": CT.TEMPERATURE_COOLING_THRESHOLD}
-        await self.write(alias, accessories, {chars[k]: to_c(v, st["units"]) for k, v in plan.items()})
-        # Confirm the values themselves: an existing hold already reads "hold".
-        keys = {"target": "target", "heat": "heat_setpoint", "cool": "cool_setpoint"}
-        expect = {keys[k]: _setpoint(to_c(v, st["units"]), st["units"]) for k, v in plan.items()}
-        return await self._settled(alias, lambda s: all(s.get(k) == v for k, v in expect.items()))
+        async with one_change_at_a_time(alias):
+            accessories = await self.fetch(alias)
+            st = thermostat_state(alias, accessories, self.config.units, self.house(alias))
+            value, heat, cool = convert_request(st, value, relative, heat, cool, unit)
+            plan = plan_setpoints(st, value, relative=relative, heat=heat, cool=cool)
+            if check:
+                check(st, plan)
+            chars = {"target": CT.TEMPERATURE_TARGET, "heat": CT.TEMPERATURE_HEATING_THRESHOLD,
+                     "cool": CT.TEMPERATURE_COOLING_THRESHOLD}
+            await self.write(alias, accessories, {chars[k]: to_c(v, st["units"]) for k, v in plan.items()})
+            # Confirm the values themselves: an existing hold already reads "hold".
+            keys = {"target": "target", "heat": "heat_setpoint", "cool": "cool_setpoint"}
+            expect = {keys[k]: _setpoint(to_c(v, st["units"]), st["units"]) for k, v in plan.items()}
+            return await self._settled(alias, lambda s: all(s.get(k) == v for k, v in expect.items()))
 
     async def set_mode(self, alias: str, mode: str) -> dict:
         code = {v: k for k, v in HVAC_MODES.items()}[mode]
-        await self.write(alias, await self.fetch(alias), {CT.HEATING_COOLING_TARGET: code})
-        return await self._settled(alias, lambda s: s["mode"] == mode)
+        async with one_change_at_a_time(alias):
+            await self.write(alias, await self.fetch(alias), {CT.HEATING_COOLING_TARGET: code})
+            return await self._settled(alias, lambda s: s["mode"] == mode)
 
     async def set_comfort(self, alias: str, comfort: str) -> dict:
         code = {v: k for k, v in COMFORT.items()}[comfort]
-        await self.write(alias, await self.fetch(alias), {CT.VENDOR_ECOBEE_SET_HOLD_SCHEDULE: code})
-        return await self._settled(alias, lambda s: s["comfort"] == comfort)
+        async with one_change_at_a_time(alias):
+            await self.write(alias, await self.fetch(alias), {CT.VENDOR_ECOBEE_SET_HOLD_SCHEDULE: code})
+            return await self._settled(alias, lambda s: s["comfort"] == comfort)
 
     async def resume(self, alias: str) -> dict:
-        await self.write(alias, await self.fetch(alias), {CT.VENDOR_ECOBEE_CLEAR_HOLD: True})
-        return await self._settled(alias, lambda s: s["comfort"] in (None, *COMFORT.values()))
+        async with one_change_at_a_time(alias):
+            await self.write(alias, await self.fetch(alias), {CT.VENDOR_ECOBEE_CLEAR_HOLD: True})
+            return await self._settled(alias, lambda s: s["comfort"] in (None, *COMFORT.values()))
 
     async def _settled(self, alias: str, done: Callable[[dict], bool], timeout: float = 8) -> dict:
         """Re-read until `done(state)` or until `timeout` (slow reads included).
