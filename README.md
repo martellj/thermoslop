@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/thermoslop-logo.svg" alt="ThermoSlop" width="420"></p>
+
 # ThermoSlop
 
 Your thermostats in the terminal, the status bar, and your AI agents' hands.
