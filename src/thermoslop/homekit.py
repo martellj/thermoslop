@@ -41,6 +41,10 @@ class ThermoSlopError(Exception):
     pass
 
 
+class Unconfirmed(ThermoSlopError):
+    """A change was sent but its outcome couldn't be read back."""
+
+
 def format_pin(pin: str) -> str:
     """HomeKit codes are used as XXX-XX-XXX; screens often show XXXX XXXX."""
     digits = re.sub(r"\D", "", pin)
@@ -154,6 +158,27 @@ def thermostat_state(
         "sensors": _sensors(accessories, units),
         "updated_at": time.time(),
     }
+
+
+def convert_request(
+    st: dict, value: float | None, relative: bool, heat: float | None, cool: float | None, unit: str | None
+) -> tuple[float | None, float | None, float | None]:
+    """Express requested temperatures (given in `unit`) in the thermostat's units.
+
+    Relative changes are differences, so they're scaled but not offset.
+    """
+    if not unit or unit == st["units"]:
+        return value, heat, cool
+
+    def absolute(v):
+        if v is None:
+            return None
+        return v * 9 / 5 + 32 if st["units"] == "F" else (v - 32) * 5 / 9
+
+    def difference(v):
+        return None if v is None else (v * 9 / 5 if st["units"] == "F" else v * 5 / 9)
+
+    return (difference(value) if relative else absolute(value)), absolute(heat), absolute(cool)
 
 
 def plan_setpoints(
@@ -399,10 +424,15 @@ class Home:
         heat: float | None = None,
         cool: float | None = None,
         check: Callable[[dict, dict[str, float]], None] | None = None,
+        unit: str | None = None,
     ) -> dict:
-        """`check(state, plan)` may raise to veto the change before anything is written."""
+        """`check(state, plan)` may raise to veto the change before anything is written.
+
+        Temperatures are in the thermostat's display units, or in `unit` ("F"/"C").
+        """
         accessories = await self.fetch(alias)
         st = thermostat_state(alias, accessories, self.config.units, self.house(alias))
+        value, heat, cool = convert_request(st, value, relative, heat, cool, unit)
         plan = plan_setpoints(st, value, relative=relative, heat=heat, cool=cool)
         if check:
             check(st, plan)
@@ -450,6 +480,6 @@ class Home:
                 write_cache([state])
                 return {**state, "confirmed": True}
         if state is None:
-            raise ThermoSlopError(f"{alias}: the change was sent, but the thermostat couldn't be read back to confirm it")
+            raise Unconfirmed(f"{alias}: the change was sent, but the thermostat couldn't be read back to confirm it")
         write_cache([state])
         return {**state, "confirmed": False}

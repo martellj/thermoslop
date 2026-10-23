@@ -224,6 +224,8 @@ async def cmd_pair(args, config) -> int:
 
     devices = await discovery.discover(args.subnet or config.subnets)
     device = discovery.choose(devices, args.device)
+    if alias := _paired_here().get(device.id.lower()):
+        raise ThermoSlopError(f"{device.name} is already paired with this machine, as {alias!r}")
     if device.paired:
         raise ThermoSlopError(
             f"{device.name} is already paired with another controller (Apple Home?). Remove it there first."

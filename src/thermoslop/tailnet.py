@@ -21,7 +21,9 @@ from thermoslop.homekit import ThermoSlopError
 log = logging.getLogger(__name__)
 
 TAILNET = (ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("fd7a:115c:a1e0::/48"))
-WHOIS_TTL = 300
+# A successful lookup is trusted this long; failures are never cached. Within it,
+# a device removed from the tailnet can still be served (SECURITY.md says so).
+WHOIS_TTL = 30
 
 
 def check_bind(address: str) -> None:
@@ -76,18 +78,22 @@ async def whois(ip: str) -> dict | None:
             "login": data["UserProfile"]["LoginName"],
             "node": data["Node"].get("ComputedName") or data["Node"]["Name"].split(".")[0],
             "fqdn": data["Node"]["Name"].rstrip("."),
+            "stable_id": data["Node"].get("StableID", ""),
         }
     except (json.JSONDecodeError, KeyError, TypeError):
         return None
 
 
 def is_allowed(identity: dict, allow: list[str]) -> bool:
-    """`allow` entries: a login ("alice@example.com"), a login prefix ending in "@"
-    ("alice@"), or a node name ("alices-laptop")."""
+    """`allow` entries: an exact login ("alice@example.com"), or one device as
+    "node:<StableID>@<owner login>". Names and prefixes aren't identities:
+    machines can be renamed, and a prefix like "alice@" matches other domains."""
     for entry in allow:
-        if entry.endswith("@") and identity["login"].startswith(entry):
-            return True
-        if entry in (identity["login"], identity["node"], identity["fqdn"]):
+        if entry.startswith("node:"):
+            node, _, login = entry[5:].partition("@")
+            if identity.get("stable_id") == node and identity["login"] == login:
+                return True
+        elif identity["login"] == entry:
             return True
     return False
 
@@ -108,20 +114,25 @@ class TailnetAuth:
         allow: list[str],
         on_refused: Callable[[str, str], None],
         lookup: Callable[[str], Awaitable[dict | None]] = whois,
+        ttl: float = WHOIS_TTL,
     ) -> None:
         self.app = app
         self.allow = allow
         self.on_refused = on_refused
         self.lookup = lookup
+        self.ttl = ttl
         self._cache: dict[str, tuple[float, dict | None]] = {}
 
     async def _identity(self, ip: str) -> dict | None:
         now = time.monotonic()
         hit = self._cache.get(ip)
-        if hit and now - hit[0] < WHOIS_TTL:
+        if hit and now - hit[0] < self.ttl:
             return hit[1]
         identity = await self.lookup(ip)
-        self._cache[ip] = (now, identity)
+        if identity is None:
+            self._cache.pop(ip, None)  # fail closed, and ask again next time
+        else:
+            self._cache[ip] = (now, identity)
         return identity
 
     async def __call__(self, scope, receive, send) -> None:

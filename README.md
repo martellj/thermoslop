@@ -119,9 +119,10 @@ claude mcp add --scope user thermoslop -- ~/.local/bin/thermoslop mcp
 - It listens only on this machine's Tailscale addresses, and refuses
   `--bind 0.0.0.0` or any non-Tailscale address.
 - Each request's source is looked up with `tailscale whois`. It's answered only
-  if the user or node is in `[mcp] allow`, which defaults to this node's owner.
+  if the caller is in `[mcp] allow`, which defaults to this node's owner.
   Anyone else gets 403, and the refusal is logged. There are no tokens: the
-  tailnet already vouches for the device.
+  tailnet already vouches for the device. A lookup is reused for up to 30
+  seconds; failures never are.
 - Requests must be addressed to this node's tailnet names, and requests carrying
   a browser `Origin` are refused, so a web page can't reach it by rebinding a
   domain to this address.
@@ -133,8 +134,15 @@ systemctl --user enable --now thermoslop-mcp    # installed by install.sh, off b
 ```toml
 [mcp]
 http_port = 8765
-allow = ["alice@", "alices-laptop"]  # login (or prefix ending in @) or node name
+allow = [
+  "alice@example.com",                          # everyone signed in as this exact login
+  "node:nAbC123DEF4CNTRL@bob@example.com",      # or just one device, while bob owns it
+]
 ```
+
+A device's stable ID is `Node.StableID` in `tailscale whois --json <its tailnet IP>`.
+Machine names and login prefixes aren't accepted: renaming a machine, or
+registering a look-alike login, could otherwise get someone in.
 
 On the other machine, point the client at `http://<node>:8765/mcp`, where
 `<node>` is this machine's MagicDNS name:
@@ -156,8 +164,19 @@ read_only = false            # true (or `thermoslop mcp --read-only`) offers onl
 min_setpoint = "55F"         # setpoints outside this range are refused ("13C" works too)
 max_setpoint = "80F"
 allow_off = false            # set_mode off is refused unless true
-max_changes_per_hour = 20    # each thermostat changed counts once; survives restarts
+max_changes_per_hour = 20    # each thermostat changed counts once; shared by all processes; survives restarts
+units = "F"                  # unit of temperatures in tool calls that don't set `unit` (default: top-level units, else F)
 ```
+
+Temperatures an agent sends are in `[mcp] units` unless the call sets
+`unit: "C"` or `"F"`, and they're converted to each thermostat's own units
+before the limits are checked. Readings come back in each thermostat's units
+(its `units` field).
+
+Comfort holds and resuming the schedule switch to the thermostat's own preset
+temperatures, which the setpoint range doesn't cover. A house-wide comfort or
+resume reports, logs and counts each thermostat separately, so one that fails
+doesn't hide the others.
 
 Refusals come back as tool errors that explain why, so the agent can tell you
 instead of retrying. Every attempted change, refusals and failures included,

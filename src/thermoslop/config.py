@@ -96,6 +96,20 @@ def degrees_in(text: str, units: str) -> float:
     return value * 9 / 5 + 32 if units == "F" else (value - 32) * 5 / 9
 
 
+def check_allow_entry(entry: str) -> None:
+    """Allow-list entries must name a durable identity (audit finding 2)."""
+    if entry.startswith("node:"):
+        node, _, login = entry[5:].partition("@")
+        if node and "@" in login:
+            return
+        raise ValueError(f"[mcp] allow {entry!r}: a device entry is node:<StableID>@<owner login>")
+    if entry.endswith("@") or "@" not in entry:
+        raise ValueError(
+            f"[mcp] allow {entry!r}: use an exact tailnet login (alice@example.com) or "
+            "node:<StableID>@<owner login>; login prefixes and machine names can be spoofed by renaming"
+        )
+
+
 @dataclass
 class McpConfig:
     """Guardrails for changes made through `thermoslop mcp` (the CLI isn't limited)."""
@@ -105,12 +119,22 @@ class McpConfig:
     max_setpoint: str = "80F"
     allow_off: bool = False
     max_changes_per_hour: int = 20
+    # Unit of temperatures in MCP tool calls that don't say ("F" or "C");
+    # unset means the top-level `units`, or F.
+    units: str | None = None
     http_port: int = 8765
-    # Tailnet login names ("alice@" matches any login starting with it) or node
-    # names allowed over HTTP. Empty means the owner of this node.
+    # Who may use `thermoslop mcp --http`: exact tailnet logins
+    # ("alice@example.com"), or one device as "node:<StableID>@<owner login>"
+    # (StableID from `tailscale whois --json <ip>`). Empty means this node's owner.
     allow: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
+        if self.units is not None:
+            self.units = str(self.units).upper()
+            if self.units not in ("F", "C"):
+                raise ValueError(f"[mcp] units must be \"F\" or \"C\", not {self.units!r}")
+        for entry in self.allow:
+            check_allow_entry(entry)
         low, high = parse_degrees(self.min_setpoint), parse_degrees(self.max_setpoint)
         if degrees_in(self.min_setpoint, "F") >= degrees_in(self.max_setpoint, "F"):
             raise ValueError(f"[mcp] min_setpoint {low} must be below max_setpoint {high}")

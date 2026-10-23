@@ -5,8 +5,8 @@ import pytest
 from thermoslop.homekit import ThermoSlopError
 from thermoslop.tailnet import TailnetAuth, check_bind, is_allowed
 
-ME = {"login": "alice@example.com", "node": "alices-laptop", "fqdn": "alices-laptop.tailnet-name.ts.net"}
-GUEST = {"login": "guest@example.com", "node": "guest-phone", "fqdn": "guest-phone.tailnet-name.ts.net"}
+ME = {"login": "alice@example.com", "node": "alices-laptop", "fqdn": "alices-laptop.tailnet-name.ts.net", "stable_id": "nLAPTOP1CNTRL"}
+GUEST = {"login": "guest@example.com", "node": "guest-phone", "fqdn": "guest-phone.tailnet-name.ts.net", "stable_id": "nPHONE1CNTRL"}
 
 
 def test_check_bind():
@@ -18,10 +18,14 @@ def test_check_bind():
 
 
 def test_is_allowed():
-    assert is_allowed(ME, ["alice@"])
     assert is_allowed(ME, ["alice@example.com"])
-    assert is_allowed(GUEST, ["guest-phone"])
-    assert not is_allowed(GUEST, ["alice@", "alices-laptop"])
+    assert not is_allowed({**ME, "login": "alice@evil.example"}, ["alice@example.com"])
+    # One device: by stable id, and only while its owner matches.
+    assert is_allowed(GUEST, ["node:nPHONE1CNTRL@guest@example.com"])
+    assert not is_allowed({**GUEST, "login": "mallory@example.com"}, ["node:nPHONE1CNTRL@guest@example.com"])
+    # Renaming doesn't move access: names aren't identities.
+    assert not is_allowed({**GUEST, "node": "alices-laptop"}, ["alice@example.com", "node:nLAPTOP1CNTRL@alice@example.com"])
+    assert is_allowed({**ME, "node": "renamed"}, ["node:nLAPTOP1CNTRL@alice@example.com"])
 
 
 def request(auth, ip):
@@ -48,7 +52,7 @@ def make_auth(refused):
     async def lookup(ip):
         return {"100.1.1.1": ME, "100.2.2.2": GUEST}.get(ip)
 
-    return TailnetAuth(None, ["alice@"], on_refused=lambda who, why: refused.append((who, why)), lookup=lookup)
+    return TailnetAuth(None, ["alice@example.com"], on_refused=lambda who, why: refused.append((who, why)), lookup=lookup)
 
 
 def test_allowed_caller_reaches_app_with_identity():
@@ -70,3 +74,17 @@ def test_source_whois_cannot_place_gets_403():
     status, _ = request(make_auth(refused), "192.168.1.50")
     assert status == 403
     assert refused == [("unknown (192.168.1.50)", "not on the tailnet")]
+
+
+def test_cached_identity_expires_and_failure_is_not_cached():
+    answers = [ME, None, ME]
+
+    async def lookup(ip):
+        return answers.pop(0)
+
+    refused = []
+    auth = TailnetAuth(None, ["alice@example.com"], on_refused=lambda who, why: refused.append(why), lookup=lookup, ttl=0)
+    assert request(auth, "100.1.1.1")[0] == 200
+    assert request(auth, "100.1.1.1")[0] == 403  # tailscaled gone: the earlier success isn't reused
+    assert request(auth, "100.1.1.1")[0] == 200  # and the failure wasn't cached either
+    assert refused == ["not on the tailnet"]

@@ -36,15 +36,32 @@ conservative:
 - **HTTP is opt-in and tailnet-only.** `thermoslop mcp --http` listens only on
   the machine's Tailscale addresses, and refuses wildcard, LAN or public binds.
 - **Callers are identified with `tailscale whois`** and checked against
-  `[mcp] allow`, which defaults to the node's owner. Unknown or unresolvable
-  sources get 403. It fails closed if `tailscaled` is down.
+  `[mcp] allow`, which defaults to the node's owner.
+  - Entries are exact logins, or a device's stable node ID tied to its
+    owner's login. Login prefixes and machine names are refused at start-up,
+    because renaming a machine or registering a look-alike login could match
+    them.
+  - Unknown or unresolvable sources get 403, and failed lookups aren't
+    cached.
+  - A successful lookup is reused for up to 30 seconds. In that window, a
+    device just removed from the tailnet, or a `tailscaled` that has just
+    stopped, can still be served.
 - **DNS-rebinding protection.** Requests must be addressed to the node's
   tailnet names, and requests with a browser `Origin` header are refused.
 - **Guardrails on every change:**
   - setpoint range (55–80°F by default)
   - `off` requires an explicit `allow_off`
-  - rate limit (20 changes/hour, surviving restarts)
+  - rate limit: 20 changes/hour, reserved before each change under a lock
+    shared by every ThermoSlop process, so simultaneous calls can't
+    overshoot it. A change whose outcome is unknown keeps counting.
   - `read_only` mode
+- **What the limits don't cover:**
+  - Comfort holds (home, away, sleep) and resuming the schedule switch to the
+    thermostat's own preset temperatures, which can sit outside the setpoint
+    range.
+  - An agent that can also run shell commands can use the `thermoslop` CLI,
+    which has no guardrails: the limits constrain the MCP interface, not
+    everything the agent can do.
 - **Everything is logged.** Every attempted change, refused ones included, is
   recorded with its caller and before/after values.
 - **No pairing over MCP.** Agents can't pair, unpair or discover devices.

@@ -71,6 +71,7 @@ def record(
     error: str | None = None,
     path: Path | None = None,
     now: float | None = None,
+    extra: dict | None = None,
 ) -> dict:
     """outcome: one of CHANGED, "refused" or "failed"."""
     path = path or config.AUDIT_FILE
@@ -87,6 +88,7 @@ def record(
     }
     if error:
         entry["error"] = error
+    entry.update(extra or {})
     private_dir(path.parent)
     if path.exists() and path.stat().st_size > ROTATE_BYTES:
         path.replace(path.with_suffix(".jsonl.1"))

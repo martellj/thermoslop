@@ -9,7 +9,7 @@ from mcp.client.client import Client
 import thermoslop.homekit
 from thermoslop.config import Config, McpConfig
 from thermoslop.guard import Guard
-from thermoslop.homekit import Home, plan_setpoints
+from thermoslop.homekit import Home, ThermoSlopError, convert_request, plan_setpoints
 from thermoslop.mcp_server import ThermostatServer
 
 HOUSES = {"home": ["192.168.1.0/24"], "cabin": ["192.168.2.0/24"]}
@@ -46,12 +46,13 @@ class FakeHome(Home):
     async def state(self, alias):
         return dict(self.thermostats[alias])
 
-    async def set_temperature(self, alias, value=None, *, relative=False, heat=None, cool=None, check=None):
+    async def set_temperature(self, alias, value=None, *, relative=False, heat=None, cool=None, check=None, unit=None):
         if alias in self.busy:
             self.overlaps += 1
         self.busy.add(alias)
         try:
             st = self.thermostats[alias]
+            value, heat, cool = convert_request(st, value, relative, heat, cool, unit)
             plan = plan_setpoints(st, value, relative=relative, heat=heat, cool=cool)
             if check:
                 check(st, plan)
@@ -98,7 +99,8 @@ def body(result):
 
 
 def audit_lines(path):
-    return [json.loads(line) for line in path.read_text().splitlines()]
+    """Change-log entries, without the rate limit's internal reservations."""
+    return [e for e in map(json.loads, path.read_text().splitlines()) if e["outcome"] != "reserved"]
 
 
 def test_read_only_lists_only_read_tools(audit):
@@ -149,9 +151,9 @@ def test_house_wide_comfort_with_verification(audit):
     applied = {r["alias"]: (r["applied"], r["reported"]) for r in body(result)}
     assert applied == {"main-floor": (False, "hold"), "upstairs": (True, "away")}
     assert home.thermostats["cabin-main-floor"]["comfort"] == "hold"
-    (entry,) = audit_lines(audit)
-    assert entry["thermostats"] == ["main-floor", "upstairs"]
-    assert entry["after"]["upstairs"]["comfort"] == "away"
+    entries = audit_lines(audit)
+    assert [e["thermostats"] for e in entries] == [["main-floor"], ["upstairs"]]
+    assert entries[1]["after"]["upstairs"]["comfort"] == "away"
 
 
 def test_audit_records_client_name(audit):
@@ -188,3 +190,91 @@ def test_rate_limit_over_mcp(audit):
     assert not results[0].is_error and results[1].is_error
     assert "rate limit" in results[1].content[0].text
     assert home.thermostats["upstairs"]["target"] == 67
+
+
+
+# ---- audit fixes (add-mcp-server group 6)
+
+def test_partial_house_wide_failure_keeps_the_successes(audit):
+    class FlakyHome(FakeHome):
+        async def set_comfort(self, alias, comfort):
+            if alias == "upstairs":
+                raise ThermoSlopError("upstairs: can't reach thermostat")
+            return await super().set_comfort(alias, comfort)
+
+    home = FlakyHome()
+    guard = Guard(McpConfig(max_changes_per_hour=5), audit)
+    (result,) = run(ThermostatServer(home, guard), ("set_comfort", {"comfort": "away", "house": "home"}))
+    assert not result.is_error
+    by_alias = {r["alias"]: r for r in body(result)}
+    assert by_alias["main-floor"]["applied"] is True and "can't reach" in by_alias["upstairs"]["error"]
+    ok, failed = audit_lines(audit)
+    assert (ok["outcome"], ok["thermostats"], ok["after"]["main-floor"]["comfort"]) == ("ok", ["main-floor"], "away")
+    assert (failed["outcome"], failed["thermostats"]) == ("failed", ["upstairs"])
+    guard.check_rate(4)  # one change counted: four more fit under five
+    with pytest.raises(Exception):
+        guard.check_rate(5)
+
+
+def test_units_are_explicit_not_guessed(audit):
+    home = FakeHome()
+    home.thermostats["upstairs"].update(units="C", target=18, heat_setpoint=18, cool_setpoint=24)
+    server = ThermostatServer(home, Guard(McpConfig(), audit))  # nothing in the cache: still °F
+    assert "°F" in server._instructions()
+    run(server, ("set_temperature", {"thermostat": "upstairs", "target": 68}))  # 68 °F
+    assert round(home.thermostats["upstairs"]["target"], 1) == 20.0  # written as 20 °C
+    run(server, ("set_temperature", {"thermostat": "upstairs", "target": 21, "unit": "C"}))
+    assert home.thermostats["upstairs"]["target"] == 21
+    (result,) = run(server, ("set_temperature", {"thermostat": "upstairs", "target": 30, "unit": "C"}))
+    assert result.is_error and "outside the allowed range" in result.content[0].text  # 30 °C > 80 °F
+
+
+def test_quota_is_reserved_across_processes(tmp_path):
+    """Two separate processes race at a limit of 1: exactly one gets the quota."""
+    import multiprocessing as mp
+
+    path = tmp_path / "changes.jsonl"
+    ctx = mp.get_context("spawn")
+    with ctx.Pool(2) as pool:
+        results = pool.map(_reserve_one, [str(path)] * 2)
+    assert sorted(results) == ["refused", "reserved"]
+
+
+def _reserve_one(path):
+    from pathlib import Path
+
+    from thermoslop.config import McpConfig
+    from thermoslop.guard import Guard, Refused
+
+    try:
+        Guard(McpConfig(max_changes_per_hour=1), Path(path)).reserve(1)
+        return "reserved"
+    except Refused:
+        return "refused"
+
+
+def test_failed_change_gives_quota_back_uncertain_keeps_it(audit):
+    guard = Guard(McpConfig(max_changes_per_hour=1), audit)
+    token = guard.reserve(1)
+    guard.record("set_temperature", {}, "local:test", "failed", ["upstairs"], error="unreachable", reservation=token)
+    token = guard.reserve(1)  # the failed one was released
+    guard.record("set_temperature", {}, "local:test", "uncertain", ["upstairs"], error="timeout", reservation=token)
+    with pytest.raises(Exception, match="rate limit"):
+        guard.reserve(1)
+
+
+def test_concurrent_calls_at_the_limit_make_one_change(audit):
+    """The audit's reproduction: two simultaneous adjustments at a limit of one."""
+    home = FakeHome()
+    server = ThermostatServer(home, Guard(McpConfig(max_changes_per_hour=1), audit))
+
+    async def go():
+        async with Client(server.mcp) as a, Client(server.mcp) as b:
+            return await asyncio.gather(
+                a.call_tool("adjust_temperature", {"thermostat": "upstairs", "delta": 1}),
+                b.call_tool("adjust_temperature", {"thermostat": "main-floor", "delta": 1}),
+            )
+
+    results = asyncio.run(go())
+    assert sorted(r.is_error for r in results) == [False, True]
+    assert sum(t["target"] == 67 for t in home.thermostats.values()) == 1

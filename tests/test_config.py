@@ -27,9 +27,9 @@ def test_mcp_defaults(tmp_path):
 
 def test_mcp_section(tmp_path):
     path = tmp_path / "config.toml"
-    path.write_text('[mcp]\nmin_setpoint = "13C"\nmax_setpoint = "25C"\nallow_off = true\nallow = ["alice@"]\n')
+    path.write_text('[mcp]\nmin_setpoint = "13C"\nmax_setpoint = "25C"\nallow_off = true\nallow = ["alice@example.com"]\nunits = "c"\n')
     mcp = load_config(path).mcp
-    assert (mcp.min_setpoint, mcp.allow_off, mcp.allow) == ("13C", True, ["alice@"])
+    assert (mcp.min_setpoint, mcp.allow_off, mcp.allow, mcp.units) == ("13C", True, ["alice@example.com"], "C")
 
 
 def test_mcp_rejects_inverted_range():
@@ -42,3 +42,13 @@ def test_mcp_unknown_key(tmp_path):
     path.write_text("[mcp]\nallow_of = true\n")
     with pytest.raises(ValueError, match="allow_of"):
         load_config(path)
+
+
+@pytest.mark.parametrize("entry", ["alice@", "alices-laptop", "node:abc", "node:abc@alice"])
+def test_mcp_allow_rejects_weak_identities(entry):
+    with pytest.raises(ValueError, match="allow"):
+        McpConfig(allow=[entry])
+
+
+def test_mcp_allow_accepts_logins_and_devices():
+    McpConfig(allow=["alice@example.com", "node:nJZFmD3fA721CNTRL@alice@example.com"])

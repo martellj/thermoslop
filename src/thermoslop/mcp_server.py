@@ -17,10 +17,10 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp_types import ToolAnnotations
 from pydantic import Field
 
-from thermoslop import APP, ops
+from thermoslop import APP, __version__, ops
 from thermoslop.audit import snapshot
 from thermoslop.guard import Guard, Refused
-from thermoslop.homekit import COMFORT, ThermoSlopError, Home, read_cache
+from thermoslop.homekit import COMFORT, Home, ThermoSlopError, Unconfirmed
 
 log = logging.getLogger(__name__)
 
@@ -44,19 +44,23 @@ def caller_of(ctx: Context) -> str:
     return f"local:{params.client_info.name}" if params else "local"
 
 
+Unit = Annotated[
+    Literal["F", "C"] | None,
+    Field(description="Unit of the temperatures in this call; defaults to the server's (see the description)."),
+]
+
+
 class ThermostatServer:
     def __init__(self, home: Home, guard: Guard, read_only: bool = False) -> None:
         self.home = home
         self.guard = guard
         self.read_only = read_only
         self._locks: dict[str, asyncio.Lock] = {}
-        self.units = home.config.units or self._cached_units()
-        self.mcp = MCPServer(APP, instructions=self._instructions())
+        # The unit tool arguments are in when a call doesn't say: fixed by config,
+        # never guessed from whichever thermostats happen to be in the cache.
+        self.units = guard.config.units or home.config.units or "F"
+        self.mcp = MCPServer(APP, version=__version__, instructions=self._instructions())
         self._register()
-
-    def _cached_units(self) -> str:
-        units = {s.get("units") for s in read_cache().get("thermostats", {}).values() if s.get("units")}
-        return units.pop() if len(units) == 1 else "F"
 
     def _limits(self) -> str:
         low, high = self.guard.limits(self.units)
@@ -65,7 +69,8 @@ class ThermostatServer:
     def _instructions(self) -> str:
         houses = ", ".join(self.home.config.houses) or "one house"
         text = (
-            f"Local control of HomeKit ecobee thermostats ({houses}). Temperatures are in °{self.units}. "
+            f"Local control of HomeKit ecobee thermostats ({houses}). Temperatures you pass are in °{self.units} "
+            "unless a call sets `unit`; readings come back in each thermostat's own units (its `units` field). "
             "Call list_thermostats or get_status first to learn aliases and houses. "
         )
         if self.read_only:
@@ -77,32 +82,67 @@ class ThermostatServer:
 
     # -- plumbing --
 
-    async def _change(self, ctx: Context, tool: str, args: dict, pick, action) -> Any:
-        """Run one guarded change: resolve targets, rate check, per-thermostat locks, audit before/after.
+    def _resolve(self, ctx: Context, tool: str, args: dict, pick) -> list[str]:
+        """Resolve targets; a failure is logged like any refused change."""
+        try:
+            return pick()
+        except ThermoSlopError as e:
+            self.guard.record(tool, args, caller_of(ctx), "failed", error=str(e))
+            raise ToolError(str(e)) from None
 
-        `pick()` returns the aliases to change; `action(aliases)` makes the change.
+    async def _change(self, ctx: Context, tool: str, args: dict, aliases: list[str], action, precheck=None) -> Any:
+        """Run one guarded change: reserve quota, lock the thermostats, log before/after.
+
+        The quota is reserved before anything slow happens, under a lock shared
+        with every other ThermoSlop process, so concurrent calls can't both slip
+        under the limit. It's given back only if nothing was written.
         """
         caller = caller_of(ctx)
-        aliases: list[str] = []
+        token = None
         try:
-            aliases = pick()
-            self.guard.check_rate(len(aliases))
+            if precheck:
+                precheck()
+            token = self.guard.reserve(len(aliases))
             before = {s["alias"]: snapshot(s) for s in await ops.status(self.home, house=None) if s["alias"] in aliases}
             async with AsyncExitStack() as stack:
                 for alias in sorted(aliases):
                     await stack.enter_async_context(self._locks.setdefault(alias, asyncio.Lock()))
                 result = await action(aliases)
         except Refused as e:
-            self.guard.record(tool, args, caller, "refused", aliases, error=str(e))
+            self.guard.record(tool, args, caller, "refused", aliases, error=str(e), reservation=token)
             raise ToolError(f"Refused: {e}") from None
-        except ThermoSlopError as e:
-            self.guard.record(tool, args, caller, "failed", aliases, error=str(e))
+        except Unconfirmed as e:
+            self.guard.record(tool, args, caller, "uncertain", aliases, error=str(e), reservation=token)
             raise ToolError(str(e)) from None
+        except ThermoSlopError as e:
+            self.guard.record(tool, args, caller, "failed", aliases, error=str(e), reservation=token)
+            raise ToolError(str(e)) from None
+        except Exception as e:
+            # Something broke mid-write (a dropped connection, a timeout): it may
+            # or may not have changed, so it keeps its quota.
+            self.guard.record(tool, args, caller, "uncertain", aliases, error=f"{e.__class__.__name__}: {e}",
+                              reservation=token)
+            raise ToolError(f"{', '.join(aliases)}: outcome unknown ({e.__class__.__name__}: {e})") from None
         states = result if isinstance(result, list) else [result]
         states = [s.get("state", s) for s in states]
         after = {s["alias"]: snapshot(s) for s in states}
-        self.guard.record(tool, args, caller, "ok", aliases, before, after)
+        outcome = "unconfirmed" if any(s.get("confirmed") is False for s in states) else "ok"
+        self.guard.record(tool, args, caller, outcome, aliases, before, after, reservation=token)
         return result
+
+    async def _each(self, ctx: Context, tool: str, args: dict, aliases: list[str], change) -> list[dict]:
+        """Change several thermostats one at a time: each is reserved, logged and
+        reported on its own, so one failure doesn't hide changes already made."""
+        results, errors = [], []
+        for alias in aliases:
+            try:
+                results.append(await self._change(ctx, tool, args, [alias], lambda a, alias=alias: change(alias)))
+            except ToolError as e:
+                results.append({"alias": alias, "error": str(e)})
+                errors.append(str(e))
+        if errors and len(errors) == len(aliases):
+            raise ToolError("; ".join(errors))
+        return results
 
     def _pick(self, thermostat: str | None, house: str | None, *, single: bool):
         def pick() -> list[str]:
@@ -113,16 +153,12 @@ class ThermostatServer:
 
         return pick
 
-    async def _verified(self, requested: str, states: list[dict]) -> list[dict]:
+    @staticmethod
+    def _verified(requested: str, state: dict) -> dict:
         """Some models (ecobee3 lite) accept comfort writes but ignore them."""
-        def applied(state: dict) -> bool:
-            reported = state.get("comfort")
-            return reported in COMFORT.values() if requested == "schedule" else reported == requested
-
-        return [
-            {"alias": s["alias"], "requested": requested, "reported": s.get("comfort"), "applied": applied(s), "state": s}
-            for s in states
-        ]
+        reported = state.get("comfort")
+        applied = reported in COMFORT.values() if requested == "schedule" else reported == requested
+        return {"alias": state["alias"], "requested": requested, "reported": reported, "applied": applied, "state": state}
 
     # -- tools --
 
@@ -145,8 +181,8 @@ class ThermostatServer:
             live: Annotated[bool, Field(description="Ask the thermostats instead of using the recent cached reading.")] = False,
         ) -> list[dict]:
             """Current temperature, humidity, HVAC mode and action, setpoints, comfort setting
-            (home/away/sleep, or 'hold' for a manual hold) and remote sensors.
-            With no arguments, covers every thermostat."""
+            (home/away/sleep, or 'hold' for a manual hold) and remote sensors, in each thermostat's
+            own units (`units`). With no arguments, covers every thermostat."""
             try:
                 return await ops.status(home, thermostat, house, live=live)
             except ThermoSlopError as e:
@@ -156,9 +192,9 @@ class ThermostatServer:
             return
 
         @mcp.tool(annotations=WRITE, description=(
-            f"Set an absolute setpoint, in °{units}. In heat or cool mode use `target`; in auto mode use "
-            f"`heat` and/or `cool`. Allowed range: {self._limits()}. Creates a hold, like changing it on the "
-            "thermostat; resume_schedule clears it."
+            f"Set an absolute setpoint, in °{units} unless `unit` says otherwise. In heat or cool mode use "
+            f"`target`; in auto mode use `heat` and/or `cool`. Allowed range: {self._limits()}. Creates a hold, "
+            "like changing it on the thermostat; resume_schedule clears it."
         ))
         async def set_temperature(
             thermostat: Thermostat = None,
@@ -166,28 +202,31 @@ class ThermostatServer:
             target: float | None = None,
             heat: float | None = None,
             cool: float | None = None,
+            unit: Unit = None,
             ctx: Context = None,
         ) -> dict:
-            args = {"thermostat": thermostat, "house": house, "target": target, "heat": heat, "cool": cool}
-            pick = self._pick(thermostat, house, single=True)
-            return await self._change(ctx, "set_temperature", args, pick, lambda aliases: home.set_temperature(
-                aliases[0], target, heat=heat, cool=cool, check=guard.check_setpoints
+            args = {"thermostat": thermostat, "house": house, "target": target, "heat": heat, "cool": cool,
+                    "unit": unit or units}
+            aliases = self._resolve(ctx, "set_temperature", args, self._pick(thermostat, house, single=True))
+            return await self._change(ctx, "set_temperature", args, aliases, lambda a: home.set_temperature(
+                a[0], target, heat=heat, cool=cool, check=guard.check_setpoints, unit=unit or units
             ))
 
         @mcp.tool(annotations=NUDGE, description=(
-            f"Raise or lower the setpoint by `delta` °{units} (−5 to +5). In auto mode both setpoints move. "
-            f"The result must stay within {self._limits()}."
+            f"Raise or lower the setpoint by `delta` degrees ({units} unless `unit` says otherwise; at most 5). "
+            f"In auto mode both setpoints move. The result must stay within {self._limits()}."
         ))
         async def adjust_temperature(
             delta: Annotated[float, Field(ge=-5, le=5)],
             thermostat: Thermostat = None,
             house: House = None,
+            unit: Unit = None,
             ctx: Context = None,
         ) -> dict:
-            args = {"thermostat": thermostat, "house": house, "delta": delta}
-            pick = self._pick(thermostat, house, single=True)
-            return await self._change(ctx, "adjust_temperature", args, pick, lambda aliases: home.set_temperature(
-                aliases[0], delta, relative=True, check=guard.check_setpoints
+            args = {"thermostat": thermostat, "house": house, "delta": delta, "unit": unit or units}
+            aliases = self._resolve(ctx, "adjust_temperature", args, self._pick(thermostat, house, single=True))
+            return await self._change(ctx, "adjust_temperature", args, aliases, lambda a: home.set_temperature(
+                a[0], delta, relative=True, check=guard.check_setpoints, unit=unit or units
             ))
 
         @mcp.tool(annotations=WRITE, description=(
@@ -200,12 +239,9 @@ class ThermostatServer:
             ctx: Context = None,
         ) -> dict:
             args = {"thermostat": thermostat, "house": house, "mode": mode}
-
-            async def action(aliases):
-                guard.check_mode(mode)
-                return await home.set_mode(aliases[0], mode)
-
-            return await self._change(ctx, "set_mode", args, self._pick(thermostat, house, single=True), action)
+            aliases = self._resolve(ctx, "set_mode", args, self._pick(thermostat, house, single=True))
+            return await self._change(ctx, "set_mode", args, aliases, lambda a: home.set_mode(a[0], mode),
+                                      precheck=lambda: guard.check_mode(mode))
 
         @mcp.tool(annotations=WRITE)
         async def set_comfort(
@@ -215,24 +251,29 @@ class ThermostatServer:
             ctx: Context = None,
         ) -> list[dict]:
             """Hold a comfort setting until resume_schedule. With `house`, applies to every thermostat
-            there. Reports per thermostat whether it took effect: some models (ecobee3 lite) ignore it."""
+            there, each reported on its own (`error` for one that failed). Reports whether it took effect:
+            some models (ecobee3 lite) ignore it. The comfort setting's temperatures are the thermostat's
+            own presets, which this server's setpoint limits don't cover."""
             args = {"thermostat": thermostat, "house": house, "comfort": comfort}
+            aliases = self._resolve(ctx, "set_comfort", args, self._pick(thermostat, house, single=not house))
 
-            async def action(aliases):
-                return await self._verified(comfort, [await home.set_comfort(a, comfort) for a in aliases])
+            async def change(alias):
+                return self._verified(comfort, await home.set_comfort(alias, comfort))
 
-            return await self._change(ctx, "set_comfort", args, self._pick(thermostat, house, single=not house), action)
+            return await self._each(ctx, "set_comfort", args, aliases, change)
 
         @mcp.tool(annotations=WRITE)
         async def resume_schedule(thermostat: Thermostat = None, house: House = None, ctx: Context = None) -> list[dict]:
             """Clear holds (setpoint or comfort) and return to the thermostat's schedule. With `house`,
-            applies to every thermostat there. Reports per thermostat whether the schedule took over."""
+            applies to every thermostat there, each reported on its own. The schedule's temperatures are
+            the thermostat's own, which this server's setpoint limits don't cover."""
             args = {"thermostat": thermostat, "house": house}
+            aliases = self._resolve(ctx, "resume_schedule", args, self._pick(thermostat, house, single=not house))
 
-            async def action(aliases):
-                return await self._verified("schedule", [await home.resume(a) for a in aliases])
+            async def change(alias):
+                return self._verified("schedule", await home.resume(alias))
 
-            return await self._change(ctx, "resume_schedule", args, self._pick(thermostat, house, single=not house), action)
+            return await self._each(ctx, "resume_schedule", args, aliases, change)
 
 
 async def serve_stdio(config, read_only: bool) -> None:
