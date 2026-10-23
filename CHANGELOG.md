@@ -10,6 +10,13 @@ version.
 
 ### Fixed
 
+- mDNS no longer runs on loopback and VPN/Tailscale interfaces, where it
+  can't send and zeroconf logged a traceback for every attempt (seen on
+  macOS's utun).
+- `thermoslop discover` columns line up with long model names.
+- With piped input, the pairing prompt ends its line, so the result starts
+  on a new one.
+- `thermoslop bar` says why it printed nothing when run in a terminal.
 - `thermoslop setup` on distributions without a systemd user session
   (Alpine/OpenRC, Void/runit, containers) crashed with `FileNotFoundError`.
   It now explains how to run `thermoslop watch` under your own service

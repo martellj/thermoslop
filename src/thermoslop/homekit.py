@@ -20,6 +20,7 @@ from aiohomekit.model import Accessories, Accessory
 from aiohomekit.model.characteristics import CharacteristicsTypes as CT
 from aiohomekit.model.services import ServicesTypes as ST
 from aiohomekit.zeroconf import ZeroconfServiceListener
+from zeroconf import InterfaceChoice
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncZeroconf
 
 from thermoslop import discovery
@@ -276,7 +277,7 @@ class Home:
 
     async def __aenter__(self) -> Home:
         private_dir(DATA_DIR)  # pairing.json and the accessory cache
-        self._zc = AsyncZeroconf()
+        self._zc = AsyncZeroconf(interfaces=discovery.lan_interfaces() or InterfaceChoice.Default)
         # aiohomekit's IP transport looks for an existing browser on the zeroconf
         # instance. On a LAN it also keeps addresses fresh via multicast.
         self._browser = AsyncServiceBrowser(

@@ -27,7 +27,7 @@ Upstairs: 71.2°F · idle · set 67°F–75°F (auto) · home · 40% RH
 ## Install
 
 ```bash
-uv tool install thermoslop    # or: pipx install thermoslop
+uv tool install --managed-python thermoslop    # or: pipx install thermoslop
 thermoslop setup              # starts the watcher service; on Omarchy, offers the bar widget
 thermoslop discover           # lists thermostats and whether they're ready to pair
 thermoslop pair <device id>   # asks for the HomeKit code shown on the thermostat
@@ -36,6 +36,10 @@ thermoslop pair <device id>   # asks for the HomeKit code shown on the thermosta
 - **Linux:** `setup` installs systemd user services.
 - **macOS:** `setup` installs launchd agents. The CLI, watcher and MCP server
   work there; the bar widget is Omarchy-only.
+- **`--managed-python`** makes uv use its own Python for your CPU, instead of
+  whatever `python3` it finds first. On an Apple Silicon Mac with an old
+  Intel Homebrew, uv otherwise picks an x86_64 Python, and building
+  `cryptography` fails.
 - **Removing the services:** `thermoslop setup --remove` takes them out and
   keeps your pairings and history.
 - **The Omarchy plugin** can also be added on its own:
@@ -408,6 +412,19 @@ ThermoSlop. Two setups work:
 
 If both machines are yours and on Tailscale, option 2 keeps one source of
 truth for pairings and the change log.
+
+**Local Network permission:** macOS asks before a process can use the local
+network, and the launchd watcher has no window to ask from. Discovery from
+Terminal works once Terminal is allowed. If the watcher on a Mac that holds
+pairings logs `No route to host` for your LAN, allow it under System Settings
+→ Privacy & Security → Local Network. It only needs the LAN to find a
+thermostat again after its address changes.
+
+SwiftBar: `brew install --cask swiftbar`, or the signed and notarized app from
+[its GitHub releases](https://github.com/swiftbar/SwiftBar/releases) if
+Homebrew isn't working. On a notched MacBook, a full menu bar can hide new
+items behind the notch; macOS 26 may also ask you to allow it under System
+Settings → Menu Bar.
 
 ## Several houses
 

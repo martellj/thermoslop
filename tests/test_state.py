@@ -160,3 +160,22 @@ def test_trend_hours_validated(tmp_path):
     (tmp_path / "config.toml").write_text("trend_hours = 1000\n")
     with pytest.raises(ValueError, match="trend_hours"):
         load_config(tmp_path / "config.toml")
+
+
+def test_mdns_skips_tunnel_and_loopback_interfaces(monkeypatch):
+    import types
+
+    import ifaddr
+
+    from thermoslop.discovery import lan_interfaces
+
+    def adapter(name, *ips):
+        return types.SimpleNamespace(name=name, nice_name=name, ips=[types.SimpleNamespace(ip=i) for i in ips])
+
+    monkeypatch.setattr(ifaddr, "get_adapters", lambda: [
+        adapter("lo0", "127.0.0.1"), adapter("en0", "192.168.1.248", ("fe80::1", 0, 0)),
+        adapter("utun4", "100.100.100.100"), adapter("tailscale0", "100.100.100.100"), adapter("en5", "169.254.3.3"),
+    ])
+    assert lan_interfaces() == ["192.168.1.248"]
+    monkeypatch.setattr(ifaddr, "get_adapters", lambda: [adapter("utun4", "100.100.100.100")])
+    assert lan_interfaces() is None  # nothing usable: let zeroconf decide

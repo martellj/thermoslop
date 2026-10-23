@@ -16,7 +16,7 @@ from aiohomekit.model import Categories
 from aiohomekit.model.feature_flags import FeatureFlags
 from aiohomekit.model.status_flags import StatusFlags
 from aiohomekit.zeroconf import HomeKitService
-from zeroconf import DNSIncoming, DNSOutgoing, DNSQuestion, DNSPointer, DNSService, DNSText
+from zeroconf import InterfaceChoice, DNSIncoming, DNSOutgoing, DNSQuestion, DNSPointer, DNSService, DNSText
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
 from zeroconf.const import _CLASS_IN, _FLAGS_QR_QUERY, _TYPE_PTR, _TYPE_SRV, _TYPE_TXT
 
@@ -167,7 +167,7 @@ async def multicast_scan(timeout: float = 3.0) -> list[Device]:
     found: dict[str, Device] = {}
     tasks: set[asyncio.Task] = set()
 
-    async with AsyncZeroconf() as azc:
+    async with AsyncZeroconf(interfaces=lan_interfaces() or InterfaceChoice.Default) as azc:
 
         async def resolve(name: str) -> None:
             info = AsyncServiceInfo(HAP_TYPE, name)
@@ -258,3 +258,27 @@ def choose(devices: list[Device], wanted: str) -> Device:
         raise ThermoSlopError(f"no device named {wanted!r} found; run `thermoslop discover`")
     listing = "; ".join(f"{d.name} (id {d.id}, {d.address})" for d in named)
     raise ThermoSlopError(f"{len(named)} devices are named {wanted!r}: {listing}. Pair by id instead.")
+
+
+TAILNET_V4 = ipaddress.ip_network("100.64.0.0/10")
+
+
+def lan_interfaces() -> list[str] | None:
+    """IPv4 addresses to run mDNS on: not loopback, not a VPN/Tailscale tunnel.
+
+    mDNS can't leave a tunnel interface, and zeroconf logs a traceback per
+    failed send (seen on macOS's utun). None means "zeroconf's default".
+    """
+    import ifaddr
+
+    found = []
+    for adapter in ifaddr.get_adapters():
+        name = adapter.nice_name or adapter.name
+        if name.startswith(("lo", "utun", "tailscale", "tun", "wg", "docker", "veth", "br-")):
+            continue
+        for ip in adapter.ips:
+            if isinstance(ip.ip, str):
+                address = ipaddress.ip_address(ip.ip)
+                if not (address.is_loopback or address.is_link_local or address in TAILNET_V4):
+                    found.append(ip.ip)
+    return found or None

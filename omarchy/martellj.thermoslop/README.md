@@ -40,7 +40,7 @@ It never edits Omarchy or system configuration.
 ## Install
 
 ```bash
-uv tool install thermoslop      # the CLI, the watcher and the MCP server
+uv tool install --managed-python thermoslop   # the CLI, the watcher and the MCP server
 thermoslop setup                # starts the watcher; on Omarchy offers to add this plugin
 thermoslop discover             # find your thermostats
 thermoslop pair <device id>     # or pair from the widget's panel: + ADD THERMOSTAT

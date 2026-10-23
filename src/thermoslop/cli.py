@@ -165,11 +165,10 @@ async def cmd_discover(args, config) -> int:
         found += [{"name": cached.get(a, {}).get("name", a), "id": "", "model": "", "address": "", "port": 0,
                    "status": "paired here", "alias": a, "paired": True, "thermostat": True}
                   for a in sorted(set(here.values()) - listed)]
-    lines = [
-        f"{f['name']:<20} {f['model']:<16} {(f['address'] + ':' + str(f['port'])) if f['address'] else '':<21} "
-        + (f"paired here as {f['alias']!r}" if f["alias"] else f["status"])
-        for f in found
-    ]
+    rows = [(f["name"], f["model"], f"{f['address']}:{f['port']}" if f["address"] else "",
+             f"paired here as {f['alias']!r}" if f["alias"] else f["status"]) for f in found]
+    widths = [max((len(r[i]) for r in rows), default=0) for i in range(3)]
+    lines = ["  ".join(c.ljust(w) for c, w in zip(r[:3], widths)) + "  " + r[3] for r in rows]
     if not found:
         hint = "" if subnets else f" (behind NAT? set `subnets` in {CONFIG_FILE} or pass --subnet)"
         lines = [f"no HomeKit thermostats found{hint}"]
@@ -208,7 +207,8 @@ def _code_needed(args, device, hint: str = "") -> None:
         print(f"({hint})", file=sys.stderr)
     print(f"Pairing started. Enter the HomeKit code {device.name} shows now", file=sys.stderr)
     print("(it may have just changed; check the screen, Menu → Settings → HomeKit).", file=sys.stderr)
-    print("HomeKit code: ", end="", file=sys.stderr, flush=True)
+    # Piped input doesn't echo a newline, so end the prompt line ourselves.
+    print("HomeKit code: ", end="" if sys.stdin.isatty() else "\n", file=sys.stderr, flush=True)
 
 
 async def cmd_pair(args, config) -> int:

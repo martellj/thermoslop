@@ -146,7 +146,10 @@ def run(fmt: str, thermostat: str | None, house: str | None, follow: bool, binar
         cache = read_cache()
         states = select(cache, thermostat, house)
         filtered = bool(cache.get("thermostats")) and not states
-        print(render(fmt, states, time.time(), binary, filtered), flush=True)
+        out = render(fmt, states, time.time(), binary, filtered)
+        print(out, flush=True)
+        if not out and sys.stdout.isatty():  # bars hide an empty module; a person wants to know why
+            print(NO_MATCH if filtered else EMPTY, file=sys.stderr)
 
     emit()
     if not follow:
