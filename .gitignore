@@ -7,3 +7,11 @@ build/
 # Local planning (OpenSpec) and its generated Claude skills/commands
 openspec/
 .claude/
+
+# Never commit local secrets or state (they live outside the repo; this is a backstop)
+pairing.json
+charmap.json
+state.json
+changes.jsonl*
+config.toml
+*.bundle

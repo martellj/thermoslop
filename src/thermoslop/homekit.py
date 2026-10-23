@@ -23,7 +23,7 @@ from aiohomekit.zeroconf import ZeroconfServiceListener
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncZeroconf
 
 from thermoslop import discovery
-from thermoslop.config import CHARMAP_FILE, PAIRING_FILE, STATE_FILE, Config
+from thermoslop.config import CHARMAP_FILE, DATA_DIR, PAIRING_FILE, STATE_FILE, Config, private_dir
 
 log = logging.getLogger(__name__)
 
@@ -223,6 +223,7 @@ class Home:
         self.controller: Controller | None = None
 
     async def __aenter__(self) -> Home:
+        private_dir(DATA_DIR)  # pairing.json and the accessory cache
         self._zc = AsyncZeroconf()
         # aiohomekit's IP transport looks for an existing browser on the zeroconf
         # instance. On a LAN it also keeps addresses fresh via multicast.

@@ -12,7 +12,7 @@ import logging
 import sys
 
 from thermoslop import APP, discovery, ops
-from thermoslop.config import CONFIG_FILE, load_config, migrate_legacy
+from thermoslop.config import CONFIG_FILE, load_config, migrate_legacy, secure_existing
 from thermoslop.homekit import (
     COMFORT,
     HVAC_MODES,
@@ -280,6 +280,7 @@ def main(argv: list[str] | None = None) -> None:
     level = logging.DEBUG if args.verbose > 1 else logging.INFO if args.verbose or args.command == "watch" else logging.WARNING
     logging.basicConfig(level=level, format="%(levelname)s %(name)s: %(message)s")
     migrate_legacy()
+    secure_existing()
     try:
         config = load_config()
     except ValueError as e:

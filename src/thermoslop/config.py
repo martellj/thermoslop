@@ -27,6 +27,28 @@ STATE_FILE = CACHE_DIR / "state.json"
 STATE_DIR = _xdg("XDG_STATE_HOME", ".local/state") / APP
 AUDIT_FILE = STATE_DIR / "changes.jsonl"
 
+# Readable by the owner only: the pairing key (full control of the thermostats),
+# config, and the audit log of tailnet callers. The cache holds only readings.
+PRIVATE_DIRS = (CONFIG_DIR, DATA_DIR, STATE_DIR)
+
+
+def private_dir(path: Path) -> Path:
+    """mkdir -m 700, tightening it if it already exists."""
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(path, 0o700)
+    return path
+
+
+def secure_existing() -> None:
+    """Tighten installs made before the directories were created 700."""
+    for directory in PRIVATE_DIRS:
+        if directory.is_dir():
+            os.chmod(directory, 0o700)
+    for path in (PAIRING_FILE, AUDIT_FILE, AUDIT_FILE.with_suffix(".jsonl.1")):
+        if path.exists():
+            os.chmod(path, 0o600)
+
+
 # Before the rename the project was called "ecobee"; its files are moved over.
 LEGACY = "ecobee"
 

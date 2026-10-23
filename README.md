@@ -119,7 +119,7 @@ systemctl --user enable --now thermoslop-mcp    # installed by install.sh, off b
 ```toml
 [mcp]
 http_port = 8765
-allow = ["alice@", "alices-laptop"]    # login (or prefix ending in @) or node name
+allow = ["alice@", "alices-laptop"]  # login (or prefix ending in @) or node name
 ```
 
 On the other machine, point the client at `http://<node>:8765/mcp`, where
@@ -210,10 +210,11 @@ running their own schedules.
 
 ## Networking notes
 
-HomeKit discovery normally uses multicast mDNS, which doesn't cross NAT. This
-Omarchy box is a VM behind NAT (`10.0.2.x`), so `discover` also sends
-**unicast DNS-SD queries** to every host in `subnets`, and those do get
-through. Connections then go straight to the stored IP:port.
+HomeKit discovery normally uses multicast mDNS, which doesn't cross NAT,
+routers or VLANs. A machine that can't see the thermostats' multicast (a VM
+behind NAT, another VLAN, another house over Tailscale) can list their subnets
+in `subnets`. `discover` then also sends **unicast DNS-SD queries** to every
+host there, and those do get through. Connections then go straight to the stored IP:port.
 
 If a thermostat's IP or HAP port changes, the next failed connection
 re-locates it by device id (first at its last IP, then by scanning `subnets`)
@@ -224,7 +225,7 @@ router makes this rarely needed.
 
 | Path | Contents |
 |---|---|
-| `~/.local/share/thermoslop/pairing.json` | HomeKit pairing keys (mode 600; treat it like an SSH key) |
+| `~/.local/share/thermoslop/pairing.json` | HomeKit pairing keys (mode 600 in a 700 directory; treat it like an SSH key, see [SECURITY.md](SECURITY.md)) |
 | `~/.local/share/thermoslop/charmap.json` | aiohomekit accessory cache |
 | `~/.local/state/thermoslop/changes.jsonl` | Audit log of changes made through MCP |
 | `~/.cache/thermoslop/state.json` | Latest state (each entry has its `house`), written atomically by the watcher and CLI |

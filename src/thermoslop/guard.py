@@ -8,12 +8,13 @@ that log, so restarting the server doesn't reset it.
 from __future__ import annotations
 
 import json
+import os
 import time
 from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 
-from thermoslop.config import AUDIT_FILE, McpConfig, degrees_in
+from thermoslop.config import AUDIT_FILE, McpConfig, degrees_in, private_dir
 from thermoslop.homekit import ThermoSlopError
 
 WINDOW = 3600
@@ -105,10 +106,12 @@ class Guard:
         }
         if error:
             entry["error"] = error
-        self.audit_file.parent.mkdir(parents=True, exist_ok=True)
+        private_dir(self.audit_file.parent)
         if self.audit_file.exists() and self.audit_file.stat().st_size > ROTATE_BYTES:
             self.audit_file.replace(self.audit_file.with_suffix(".jsonl.1"))
-        with self.audit_file.open("a") as f:
+        # 600: it records tailnet logins and node names.
+        fd = os.open(self.audit_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "a") as f:
             f.write(json.dumps(entry) + "\n")
         if outcome == "ok":
             self._changes.extend([now] * max(1, len(thermostats)))

@@ -70,3 +70,28 @@ def test_never_overwrites(xdg):
     assert (root / "config/thermoslop/config.toml").read_text() == "units = \"C\"\n"
     assert (root / "config/ecobee/config.toml").exists()
     assert config.migrate_legacy() == []  # second run: nothing left to move
+
+
+def _mode(path):
+    return stat.S_IMODE(path.stat().st_mode)
+
+
+def test_secure_existing_tightens_old_installs(xdg):
+    root, config = xdg
+    for d in (config.CONFIG_DIR, config.DATA_DIR, config.STATE_DIR, config.CACHE_DIR):
+        d.mkdir(parents=True, mode=0o755)
+    config.PAIRING_FILE.write_text("{}")
+    os.chmod(config.PAIRING_FILE, 0o644)
+    config.AUDIT_FILE.write_text("")
+    config.secure_existing()
+    assert [_mode(d) for d in (config.CONFIG_DIR, config.DATA_DIR, config.STATE_DIR)] == [0o700] * 3
+    assert _mode(config.CACHE_DIR) == 0o755  # readings only, for the widget
+    assert _mode(config.PAIRING_FILE) == _mode(config.AUDIT_FILE) == 0o600
+
+
+def test_audit_log_is_private(xdg):
+    root, config = xdg
+    from thermoslop.guard import Guard
+
+    Guard(config.McpConfig(), config.AUDIT_FILE).record("set_temperature", {}, "test", "ok", ["upstairs"])
+    assert _mode(config.AUDIT_FILE) == 0o600 and _mode(config.STATE_DIR) == 0o700
