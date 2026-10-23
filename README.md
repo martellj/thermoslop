@@ -60,7 +60,7 @@ All of them take `--json` (machine-readable; errors come back as
 | `thermoslop home\|away\|sleep [--all]` | Hold a comfort setting. |
 | `thermoslop resume [--all]` | Clear holds and go back to the schedule. |
 | `thermoslop discover [--all]` | Find HomeKit thermostats (or every HomeKit accessory with `--all`). |
-| `thermoslop pair NAME`, `thermoslop unpair -t NAME` | Manage pairings. |
+| `thermoslop pair NAME [--demo]`, `thermoslop unpair -t NAME` | Manage pairings (`--demo`: a pretend thermostat, nothing saved). |
 | `thermoslop watch` | The daemon behind the widget (run by `thermoslop-watch.service`). |
 | `thermoslop log [--hours 24] [--source S]` | Recent changes and where they came from (see [Change log](#change-log)). |
 | `thermoslop mcp [--read-only]` | MCP server for AI clients (see below). |
@@ -198,6 +198,15 @@ when every thermostat is away) and each thermostat's temperature.
   The mode bar along the bottom (heat, cool, eco = away, hold = resume the
   schedule) acts on every thermostat the panel shows. Colors come from your
   Omarchy theme.
+- **+ ADD THERMOSTAT** (in the panel): pair a new thermostat without a terminal.
+  1. It scans the network and lists HomeKit thermostats as ready, paired here or
+     paired elsewhere.
+  2. PAIR starts pairing.
+  3. It asks for the code the thermostat shows *now*, which changes once pairing
+     starts.
+  4. It shows success, or the error with Try Again.
+
+  It runs the same `thermoslop discover` / `thermoslop pair` as the terminal.
 - **right click**: away hold on all thermostats, or resume the schedule if any is away
 - **middle click**: resume the schedule
 - **scroll**: setpoint ±1° on the first thermostat, sent once scrolling stops
@@ -209,6 +218,17 @@ temperature per thermostat every 5 minutes for the trend line, kept for
 reading, not an average, and gaps while a thermostat is unreachable are drawn
 straight across. The widget never polls the thermostats itself, and dims when the data
 is more than 10 minutes old.
+
+To try the pairing flow without touching your pairings, set
+`"pairingDemo": true` on the widget's entry in `~/.config/omarchy/shell.json`.
+"Add thermostat" then uses `--demo`: a pretend "Basement" thermostat that shows
+code `314-15-926` (any other code is rejected) and a "Garage" paired elsewhere.
+Nothing is paired, saved or logged. The same works from a terminal:
+`thermoslop discover --demo` and `thermoslop pair Basement --demo`.
+
+From scripts or a keybinding: `omarchy-shell thermoslop open` opens the panel,
+`omarchy-shell thermoslop add` opens it on "Add thermostat", and
+`omarchy-shell thermoslop pair NAME` starts pairing with a discovered device.
 
 To show or control just one thermostat, set `"thermostat": "upstairs"` on its
 entry in `~/.config/omarchy/shell.json`. `allowMultiple` is on, so you can

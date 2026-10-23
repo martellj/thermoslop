@@ -14,7 +14,7 @@ import sys
 import time
 
 from thermoslop import APP, audit, discovery, ops
-from thermoslop.config import CONFIG_FILE, load_config, migrate_legacy, secure_existing
+from thermoslop.config import CONFIG_FILE, PAIRING_FILE, load_config, migrate_legacy, secure_existing
 from thermoslop.homekit import (
     COMFORT,
     HVAC_MODES,
@@ -117,23 +117,76 @@ async def logged(args, tool: str, change):
 # ---- commands ----------------------------------------------------------------
 
 
+def _paired_here() -> dict[str, str]:
+    """Device id (lower case) -> alias, for thermostats paired with this machine."""
+    try:
+        pairings = json.loads(PAIRING_FILE.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+    return {p.get("AccessoryPairingID", "").lower(): alias for alias, p in pairings.items()}
+
+
+def _discovered(d, here: dict[str, str]) -> dict:
+    alias = here.get(d.id.lower())
+    status = "paired here" if alias else "paired elsewhere" if d.paired else "ready to pair"
+    return {**d.to_dict(), "status": status, "alias": alias}
+
+
 async def cmd_discover(args, config) -> int:
     subnets = args.subnet or config.subnets
-    devices = await discovery.discover(subnets, timeout=args.timeout)
+    if args.demo:
+        from thermoslop import demo
+
+        devices = demo.devices()
+    else:
+        devices = await discovery.discover(subnets, timeout=args.timeout)
     if not args.all:
         devices = [d for d in devices if d.is_thermostat]
+    here = _paired_here()
+    found = [_discovered(d, here) for d in devices]
+    if args.demo:
+        # Show your real pairings too, so the list looks like it would.
+        listed = {f["alias"] for f in found if f["alias"]}
+        cached = read_cache().get("thermostats", {})
+        found += [{"name": cached.get(a, {}).get("name", a), "id": "", "model": "", "address": "", "port": 0,
+                   "status": "paired here", "alias": a, "paired": True, "thermostat": True}
+                  for a in sorted(set(here.values()) - listed)]
     lines = [
-        f"{d.name:<20} {d.model:<16} {d.address}:{d.port}  id={d.id}  {'paired elsewhere' if d.paired else 'ready to pair'}"
-        for d in devices
+        f"{f['name']:<20} {f['model']:<16} {(f['address'] + ':' + str(f['port'])) if f['address'] else '':<21} "
+        + (f"paired here as {f['alias']!r}" if f["alias"] else f["status"])
+        for f in found
     ]
-    if not devices:
+    if not found:
         hint = "" if subnets else f" (behind NAT? set `subnets` in {CONFIG_FILE} or pass --subnet)"
         lines = [f"no HomeKit thermostats found{hint}"]
-    emit(args, [d.to_dict() for d in devices], "\n".join(lines))
+    emit(args, found, "\n".join(lines))
     return 0
 
 
+def _code_needed(args, device, hint: str = "") -> None:
+    """Tell the person (or, with --json, the panel) that the code is wanted now."""
+    if args.json:
+        event = {"event": "code_needed", "device": device.name, "hint": hint}
+        print(json.dumps(event), file=sys.stderr, flush=True)
+        return
+    if hint:
+        print(f"({hint})", file=sys.stderr)
+    print(f"Pairing started. Enter the HomeKit code {device.name} shows now", file=sys.stderr)
+    print("(it may have just changed; check the screen, Menu → Settings → HomeKit).", file=sys.stderr)
+    print("HomeKit code: ", end="", file=sys.stderr, flush=True)
+
+
 async def cmd_pair(args, config) -> int:
+    async def read_pin() -> str:
+        return args.pin or (await asyncio.to_thread(sys.stdin.readline)).strip()
+
+    if args.demo:
+        from thermoslop import demo
+
+        state = await demo.pair(args.device, args.alias, read_pin, lambda d, hint: _code_needed(args, d, hint))
+        emit(args, state, f"Paired {state['name']} as {state['alias']!r} (demo: nothing was saved).\n{format_state(state)}")
+        return 0
+
     devices = await discovery.discover(args.subnet or config.subnets)
     want = args.device.lower()
     matches = [d for d in devices if want in (d.id, d.address) or slugify(d.name) == slugify(args.device)]
@@ -145,12 +198,9 @@ async def cmd_pair(args, config) -> int:
             f"{device.name} is already paired with another controller (Apple Home?). Remove it there first."
         )
     async def get_pin() -> str:
-        if args.pin:
-            return args.pin
-        print(f"Pairing started. Enter the HomeKit code {device.name} shows now", file=sys.stderr)
-        print("(it may have just changed; check the screen, Menu → Settings → HomeKit).", file=sys.stderr)
-        print("HomeKit code: ", end="", file=sys.stderr, flush=True)
-        return (await asyncio.to_thread(sys.stdin.readline)).strip()
+        if not args.pin:
+            _code_needed(args, device)
+        return await read_pin()
 
     async with Home(config) as home:
         alias = args.alias or slugify(device.name)
@@ -343,6 +393,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--subnet", action="append", help="also scan this subnet by unicast (repeatable)")
     s.add_argument("--timeout", type=float, default=3.0)
     s.add_argument("--all", action="store_true", help="show every HomeKit accessory, not just thermostats")
+    s.add_argument("--demo", action="store_true", help="pretend thermostats, to preview pairing (no network)")
     s.set_defaults(func=cmd_discover)
 
     s = sub.add_parser("pair", parents=[common], help="pair with a thermostat using its HomeKit code")
@@ -350,6 +401,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--pin", help="HomeKit code XXX-XX-XXX (prompted if omitted)")
     s.add_argument("--alias", help="short name to use (default: slug of the device name)")
     s.add_argument("--subnet", action="append")
+    s.add_argument("--demo", action="store_true", help="pair with a pretend thermostat; nothing is saved")
     s.set_defaults(func=cmd_pair)
 
     s = sub.add_parser("unpair", parents=[common], help="remove a pairing")

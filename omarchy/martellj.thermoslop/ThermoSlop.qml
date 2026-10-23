@@ -10,6 +10,8 @@
 // Optional settings on the widget's entry in shell.json:
 //   "thermostat": "upstairs"   show / control only this one
 //   "house": "cabin"           show / control only this house's thermostats
+//   "pairingDemo": true        "Add thermostat" pairs with a pretend thermostat
+//                              (thermoslop discover/pair --demo); nothing is saved
 // With several houses shown, temperatures are grouped per house: 68° 70° │ 55°
 import QtQuick
 import Quickshell
@@ -97,6 +99,7 @@ BarWidget {
   }
 
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
+  readonly property var panel: panelLoader.item
   readonly property bool popoutSwitchClosing: panelLoader.item ? panelLoader.item.popoutSwitchClosing === true : false
   function open() { if (panelLoader.item) panelLoader.item.openFromHotkey() }
   function close() { if (panelLoader.item) panelLoader.item.close() }

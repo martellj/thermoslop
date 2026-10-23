@@ -7,6 +7,7 @@
 // varying alpha for surfaces), so the panel follows theme changes.
 import QtQuick 6.11 // omacvm #376: QtQuick's own Color (Qt 6.12) would hide Omarchy's
 import Quickshell
+import Quickshell.Io
 import qs.Commons
 import qs.Ui
 
@@ -137,6 +138,126 @@ Panel {
     onTriggered: root.pending = ({})
   }
 
+  // ---- adding a thermostat. Runs `thermoslop discover --json` and
+  // `thermoslop pair NAME --json`, which announces on stderr when it wants the
+  // code; the code goes to its stdin. With the widget's `pairingDemo` setting
+  // both run with --demo: a pretend thermostat, nothing is saved.
+
+  property string view: "zones"         // "zones" or "add"
+  property string pairStage: "idle"     // scanning, list, starting, code, verifying, done, error
+  property var found: []
+  property string pairName: ""
+  property string pairHint: ""
+  property string pairError: ""
+  property var paired: null
+  readonly property bool pairingDemo: !!(root.settings && root.settings.pairingDemo)
+  readonly property var demoArgs: pairingDemo ? ["--demo"] : []
+
+  function startAdding() {
+    root.view = "add"
+    scan()
+  }
+
+  function scan() {
+    root.pairStage = "scanning"
+    root.found = []
+    root.pairError = ""
+    discoverProc.command = ["thermoslop", "discover", "--json"].concat(root.demoArgs)
+    discoverProc.running = true
+  }
+
+  function beginPair(name) {
+    root.pairName = name
+    root.pairHint = ""
+    root.pairError = ""
+    root.pairStage = "starting"
+    pairProc.command = ["env", "THERMOSLOP_SOURCE=widget", "thermoslop", "pair", name, "--json"].concat(root.demoArgs)
+    pairProc.running = true
+  }
+
+  function submitCode(code) {
+    if (code.replace(/\D/g, "").length !== 8) return
+    root.pairStage = "verifying"
+    pairProc.write(code + "\n")
+  }
+
+  function stopAdding() {
+    root.pairStage = "idle"
+    if (pairProc.running) pairProc.running = false
+    if (discoverProc.running) discoverProc.running = false
+    root.view = "zones"
+  }
+
+  // `omarchy-shell thermoslop add` opens the panel on "Add thermostat"
+  // (bindable to a key); `… pair NAME` starts pairing with a found device.
+  // There's a widget (and panel) per monitor, and only one gets the IPC
+  // target, so it hands off to the copy the bar picks for the focused screen.
+  function visibleCopy() {
+    const widget = root.bar && typeof root.bar.findPanelWidget === "function"
+      ? root.bar.findPanelWidget("martellj.thermoslop") : null
+    return widget && widget.panel ? widget.panel : root
+  }
+
+  IpcHandler {
+    target: "thermoslop"
+    function open(): void { root.visibleCopy().open() }
+    function add(): void { const p = root.visibleCopy(); p.open(); p.startAdding() }
+    function pair(name: string): void { const p = root.visibleCopy(); p.open(); p.view = "add"; p.beginPair(name) }
+  }
+
+  Process {
+    id: discoverProc
+    stdout: StdioCollector {
+      onStreamFinished: {
+        if (root.pairStage !== "scanning") return
+        try {
+          const result = JSON.parse(text || "[]")
+          if (Array.isArray(result)) {
+            root.found = result
+            root.pairStage = "list"
+            return
+          }
+          root.pairError = result.error || "discovery failed"
+        } catch (e) {
+          root.pairError = "discovery failed"
+        }
+        root.pairStage = "error"
+      }
+    }
+  }
+
+  Process {
+    id: pairProc
+    stdinEnabled: true
+    stderr: SplitParser {
+      onRead: function(line) {
+        try {
+          const event = JSON.parse(line)
+          if (event.event === "code_needed") {
+            root.pairHint = event.hint || ""
+            root.pairStage = "code"
+          }
+        } catch (e) {
+          // Plain log lines; only the JSON event matters here.
+        }
+      }
+    }
+    stdout: StdioCollector {
+      onStreamFinished: {
+        if (root.pairStage === "idle") return  // cancelled
+        let result = {}
+        try { result = JSON.parse(text || "{}") } catch (e) {}
+        if (result.alias) {
+          root.paired = result
+          root.pairStage = "done"
+        } else {
+          root.pairError = result.error || "pairing failed"
+          root.pairStage = "error"
+        }
+      }
+    }
+  }
+
   KeyboardPanel {
     id: panel
     anchorItem: root.anchorItem
@@ -151,7 +272,8 @@ Panel {
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      onCloseRequested: root.close()
+      blocked: codeField.activeFocus
+      onCloseRequested: root.view === "add" ? root.stopAdding() : root.close()
       onTabRequested: function(direction) { root.switchPanel(direction) }
 
       Flickable {
@@ -243,6 +365,7 @@ Panel {
             }
 
             Badge {
+              id: zonesPill
               anchors.right: parent.right
               anchors.rightMargin: Style.space(12)
               anchors.verticalCenter: parent.verticalCenter
@@ -254,7 +377,7 @@ Panel {
 
           // ---- one card per thermostat
           Repeater {
-            model: root.zones
+            model: root.view === "zones" ? root.zones : []
 
             Column {
               id: zone
@@ -485,6 +608,7 @@ Panel {
 
           // ---- mode bar
           Card {
+            visible: root.view === "zones"
             width: parent.width
             height: Style.space(62)
 
@@ -521,6 +645,275 @@ Panel {
                 highlightOnly: true
                 // Lit while any thermostat holds a manual setpoint; pressing resumes the schedule.
                 onClicked: root.forEachZone(t => "resume")
+              }
+            }
+          }
+
+          TextButton {
+            visible: root.view === "zones"
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: "+ ADD THERMOSTAT"
+            onClicked: root.startAdding()
+          }
+
+          // ---- adding a thermostat
+          Card {
+            visible: root.view === "add"
+            width: parent.width
+            height: addBody.implicitHeight + Style.space(28)
+
+            Column {
+              id: addBody
+              anchors.fill: parent
+              anchors.margins: Style.space(14)
+              spacing: Style.space(12)
+
+              Item {
+                width: parent.width
+                height: addTitle.implicitHeight
+
+                StepButton {
+                  anchors.right: parent.right
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: "×"
+                  onClicked: root.stopAdding()
+                }
+
+              Row {
+                id: addTitle
+                spacing: Style.space(8)
+                Text {
+                  text: "ADD THERMOSTAT"
+                  color: root.fg
+                  font.family: root.font
+                  font.pixelSize: Style.font.subtitle
+                  font.bold: true
+                  font.letterSpacing: 1.5
+                }
+                Badge {
+                  visible: root.pairingDemo
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: "DEMO"
+                  tint: root.cool
+                }
+              }
+              }
+
+              Rectangle { width: parent.width; height: 1; color: root.hairline }
+
+              // scanning / starting / verifying
+              Row {
+                visible: ["scanning", "starting", "verifying"].includes(root.pairStage)
+                spacing: Style.space(10)
+                Text {
+                  id: spinner
+                  text: "󰑓"
+                  color: root.accent
+                  font.family: root.font
+                  font.pixelSize: Style.font.iconLarge
+                  RotationAnimation on rotation {
+                    running: spinner.visible
+                    from: 0; to: 360; duration: 1200; loops: Animation.Infinite
+                  }
+                }
+                Column {
+                  anchors.verticalCenter: parent.verticalCenter
+                  spacing: Style.space(2)
+                  Text {
+                    text: root.pairStage === "scanning" ? "Looking for HomeKit thermostats…"
+                      : root.pairStage === "starting" ? "Starting pairing with " + root.pairName + "…"
+                      : "Checking the code…"
+                    color: root.fg
+                    font.family: root.font
+                    font.pixelSize: Style.font.body
+                  }
+                  Text {
+                    visible: root.pairStage === "starting"
+                    text: "It shows a fresh code once pairing starts."
+                    color: root.dim
+                    font.family: root.font
+                    font.pixelSize: Style.font.bodySmall
+                  }
+                }
+              }
+
+              // found devices
+              Column {
+                visible: root.pairStage === "list"
+                width: parent.width
+                spacing: Style.space(8)
+
+                Repeater {
+                  model: root.found
+
+                  Rectangle {
+                    id: deviceRow
+                    required property var modelData
+                    readonly property bool ready: modelData.status === "ready to pair"
+                    width: parent.width
+                    height: Style.space(48)
+                    radius: Style.space(8)
+                    color: Util.alpha(root.fg, ready ? 0.05 : 0.02)
+                    border.color: ready ? Util.alpha(root.good, 0.4) : root.hairline
+                    border.width: 1
+
+                    Column {
+                      anchors.left: parent.left
+                      anchors.leftMargin: Style.space(12)
+                      anchors.verticalCenter: parent.verticalCenter
+                      spacing: Style.space(2)
+                      Text {
+                        text: deviceRow.modelData.name
+                        color: root.fg
+                        font.family: root.font
+                        font.pixelSize: Style.font.body
+                        font.bold: true
+                      }
+                      Text {
+                        text: [deviceRow.modelData.model, deviceRow.modelData.address].filter(x => x).join(" · ") || "paired as " + deviceRow.modelData.alias
+                        color: root.dim
+                        font.family: root.font
+                        font.pixelSize: Style.font.caption
+                      }
+                    }
+
+                    Row {
+                      anchors.right: parent.right
+                      anchors.rightMargin: Style.space(10)
+                      anchors.verticalCenter: parent.verticalCenter
+                      spacing: Style.space(8)
+                      Badge {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: deviceRow.ready ? "READY" : deviceRow.modelData.status === "paired here" ? "PAIRED HERE" : "PAIRED ELSEWHERE"
+                        tint: deviceRow.ready ? root.good : deviceRow.modelData.status === "paired here" ? root.accent : root.dim
+                      }
+                      TextButton {
+                        visible: deviceRow.ready
+                        text: "PAIR"
+                        primary: true
+                        onClicked: root.beginPair(deviceRow.modelData.name)
+                      }
+                    }
+                  }
+                }
+
+                Text {
+                  visible: !root.found.some(d => d.status === "ready to pair")
+                  width: parent.width
+                  wrapMode: Text.WordWrap
+                  text: "Nothing is ready to pair. A thermostat pairs with one HomeKit controller: remove it from Apple Home, or reset HomeKit on it (Menu → Settings → HomeKit)."
+                  color: root.dim
+                  font.family: root.font
+                  font.pixelSize: Style.font.bodySmall
+                }
+
+                TextButton {
+                  text: "RESCAN"
+                  onClicked: root.scan()
+                }
+              }
+
+              // code entry
+              Column {
+                visible: root.pairStage === "code"
+                width: parent.width
+                spacing: Style.space(8)
+
+                Text {
+                  text: "Enter the code " + root.pairName + " shows now"
+                  color: root.fg
+                  font.family: root.font
+                  font.pixelSize: Style.font.body
+                  font.bold: true
+                }
+                Text {
+                  width: parent.width
+                  wrapMode: Text.WordWrap
+                  text: "On the thermostat: Menu → Settings → HomeKit. It changes when pairing starts, so use the one on screen now."
+                  color: root.dim
+                  font.family: root.font
+                  font.pixelSize: Style.font.bodySmall
+                }
+                Text {
+                  visible: root.pairHint !== ""
+                  text: root.pairHint
+                  color: root.cool
+                  font.family: root.font
+                  font.pixelSize: Style.font.bodySmall
+                }
+                Row {
+                  spacing: Style.space(8)
+                  TextField {
+                    id: codeField
+                    width: Style.space(170)
+                    placeholderText: "XXX-XX-XXX"
+                    font.family: root.font
+                    font.pixelSize: Style.font.heading
+                    font.letterSpacing: 2
+                    inputMethodHints: Qt.ImhDigitsOnly
+                    onAccepted: root.submitCode(text)
+                    onVisibleChanged: if (visible) { text = ""; forceActiveFocus() }
+                  }
+                  TextButton {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "PAIR"
+                    primary: true
+                    enabled: codeField.text.replace(/\D/g, "").length === 8
+                    onClicked: root.submitCode(codeField.text)
+                  }
+                }
+              }
+
+              // done
+              Column {
+                visible: root.pairStage === "done"
+                spacing: Style.space(6)
+                Text {
+                  text: "󰄬 Paired " + (root.paired ? root.paired.name + " as '" + root.paired.alias + "'" : "")
+                  color: root.good
+                  font.family: root.font
+                  font.pixelSize: Style.font.title
+                  font.bold: true
+                }
+                Text {
+                  text: root.paired && root.paired.demo ? "Demo: nothing was saved; your pairings are unchanged."
+                    : "It appears in the bar once the watcher picks it up (a few seconds)."
+                  color: root.dim
+                  font.family: root.font
+                  font.pixelSize: Style.font.bodySmall
+                }
+                TextButton {
+                  text: "DONE"
+                  primary: true
+                  onClicked: root.stopAdding()
+                }
+              }
+
+              // error
+              Column {
+                visible: root.pairStage === "error"
+                width: parent.width
+                spacing: Style.space(8)
+                Text {
+                  width: parent.width
+                  wrapMode: Text.WordWrap
+                  text: root.pairError
+                  color: root.bad
+                  font.family: root.font
+                  font.pixelSize: Style.font.body
+                }
+                Row {
+                  spacing: Style.space(8)
+                  TextButton {
+                    text: "TRY AGAIN"
+                    primary: true
+                    onClicked: root.pairName ? root.beginPair(root.pairName) : root.scan()
+                  }
+                  TextButton {
+                    text: "BACK"
+                    onClicked: root.scan()
+                  }
+                }
               }
             }
           }
@@ -573,6 +966,40 @@ Panel {
         font.bold: true
         font.letterSpacing: 1
       }
+    }
+  }
+
+  component TextButton: Rectangle {
+    id: textButton
+    property string text: ""
+    property bool primary: false
+    property bool enabled: true
+    signal clicked()
+    width: textButtonLabel.implicitWidth + Style.space(22)
+    height: Style.space(28)
+    radius: Style.space(6)
+    color: primary ? Util.alpha(root.accent, buttonMouse.containsMouse && enabled ? 0.26 : 0.16)
+      : (buttonMouse.containsMouse && enabled ? Util.alpha(root.fg, 0.08) : "transparent")
+    border.color: primary ? Util.alpha(root.accent, 0.6) : Util.alpha(root.fg, 0.18)
+    border.width: 1
+    opacity: enabled ? 1 : 0.4
+
+    Text {
+      id: textButtonLabel
+      anchors.centerIn: parent
+      text: textButton.text
+      color: textButton.primary ? root.accent : root.fg
+      font.family: root.font
+      font.pixelSize: Style.font.caption
+      font.bold: true
+      font.letterSpacing: 1
+    }
+    MouseArea {
+      id: buttonMouse
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: textButton.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+      onClicked: if (textButton.enabled) textButton.clicked()
     }
   }
 
