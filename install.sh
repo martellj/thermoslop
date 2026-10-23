@@ -1,8 +1,11 @@
 #!/bin/bash
-# Install ThermoSlop (editable, from this checkout): the thermoslop CLI, the
-# watcher service, the MCP service (off by default), and the Omarchy bar
-# widget. Safe to re-run, and upgrades an install from before the rename
-# (when it was called "ecobee") in place.
+# Developer install of ThermoSlop from this checkout: an editable venv, the
+# thermoslop CLI, the services (via `thermoslop setup`), and the Omarchy bar
+# widget symlinked from omarchy/. Safe to re-run, and upgrades an install from
+# before the rename (when it was called "ecobee") in place.
+#
+# Users install the released package instead:
+#   uv tool install thermoslop && thermoslop setup
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")" && pwd)"
@@ -40,19 +43,13 @@ echo "→ ~/.local/bin/thermoslop"
 # Moves config, pairings, cache and audit log over from the old name (no-op otherwise).
 "$venv/bin/python" -c 'from thermoslop.config import migrate_legacy; migrate_legacy()'
 
-mkdir -p "$units"
-ln -sfn "$repo/systemd/thermoslop-watch.service" "$units/thermoslop-watch.service"
-# Installed but off: serving MCP over the tailnet is opt-in.
-ln -sfn "$repo/systemd/thermoslop-mcp.service" "$units/thermoslop-mcp.service"
-systemctl --user daemon-reload
-systemctl --user enable --now thermoslop-watch.service
-systemctl --user restart thermoslop-watch.service  # pick up new code on re-runs
-echo "→ thermoslop-watch.service enabled"
+# The services (thermoslop-watch on, thermoslop-mcp installed but off) come from
+# `thermoslop setup`, the same as for a package install. The plugin is
+# symlinked from this checkout below, so setup doesn't offer the released one.
+"$HOME/.local/bin/thermoslop" setup --no-plugin
 if $mcp_was_enabled; then
   systemctl --user enable --now thermoslop-mcp.service
   echo "→ thermoslop-mcp.service enabled (ecobee-mcp was)"
-else
-  echo "→ thermoslop-mcp.service installed (off; enable with: systemctl --user enable --now thermoslop-mcp)"
 fi
 
 if [[ -d $plugins ]]; then

@@ -389,6 +389,14 @@ async def cmd_mcp(args, config) -> int:
     return 0
 
 
+async def cmd_setup(args, config) -> int:
+    from thermoslop.setup import setup
+
+    for line in setup(remove=args.remove, assume_yes=args.yes, plugin=not args.no_plugin):
+        print(f"→ {line}")
+    return 0
+
+
 async def cmd_dump(args, config) -> int:
     async with Home(config) as home:
         (alias,) = home.pick(args.thermostat, args.house, single=True)
@@ -467,6 +475,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("-n", "--limit", type=int, default=50, help="at most this many entries (newest)")
     s.add_argument("--source", choices=audit.SOURCES, help="only changes from this source")
     s.set_defaults(func=cmd_log)
+
+    s = sub.add_parser("setup", parents=[common], help="install the background services (systemd or launchd)")
+    s.add_argument("--remove", action="store_true", help="stop and remove them (keeps pairings and history)")
+    s.add_argument("--yes", action="store_true", help="don't ask; also adds the Omarchy plugin when on Omarchy")
+    s.add_argument("--no-plugin", action="store_true", help="don't offer the Omarchy plugin")
+    s.set_defaults(func=cmd_setup)
 
     s = sub.add_parser("dump", parents=[common], help="raw HomeKit accessory data (debugging)")
     s.set_defaults(func=cmd_dump)

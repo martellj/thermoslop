@@ -12,6 +12,8 @@ import asyncio
 import ipaddress
 import json
 import logging
+import os
+import shutil
 import socket
 import time
 from collections.abc import Awaitable, Callable
@@ -36,9 +38,20 @@ def check_bind(address: str) -> None:
         raise ThermoSlopError(f"refusing to listen on {address}: only Tailscale addresses (100.64.0.0/10, fd7a:115c:a1e0::/48)")
 
 
+MAC_APP_CLI = "/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+
+
+def tailscale_cli() -> str:
+    """`tailscale` on PATH, else the Mac app's bundled CLI."""
+    found = shutil.which("tailscale") or (MAC_APP_CLI if os.path.exists(MAC_APP_CLI) else None)
+    if not found:
+        raise ThermoSlopError("`thermoslop mcp --http` needs Tailscale: no `tailscale` on PATH or in /Applications")
+    return found
+
+
 async def _tailscale(*args: str) -> tuple[int, str]:
     proc = await asyncio.create_subprocess_exec(
-        "tailscale", *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
+        tailscale_cli(), *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
     )
     out, _ = await proc.communicate()
     return proc.returncode, out.decode()
