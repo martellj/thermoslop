@@ -353,6 +353,11 @@ exec = thermoslop bar --follow
 tail = true
 ```
 
+**XFCE:** add a *Generic Monitor* panel item with the command
+`thermoslop bar` and a period of 60 seconds.
+
+**Sway or Hyprland without Omarchy:** use the Waybar module above.
+
 **SwiftBar (macOS):** save as `thermoslop.30s.sh` in your SwiftBar plugin
 folder and make it executable. SwiftBar runs plugins without your shell's
 PATH, so use the full path:
