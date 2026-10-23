@@ -8,6 +8,8 @@ version.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-22
+
 ### Added
 
 - A preview image of the panel for the Omarchy plugin marketplace.
