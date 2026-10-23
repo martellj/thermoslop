@@ -8,6 +8,8 @@ version.
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-10-22
+
 ### Changed
 
 - The panel's "watcher offline" hint now says `run: thermoslop setup`, which

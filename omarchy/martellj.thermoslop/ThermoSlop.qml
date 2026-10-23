@@ -31,7 +31,7 @@ BarWidget {
 
   // The plugin drives the `thermoslop` CLI and reads its state file, so it
   // needs a CLI at least as new as itself (scripts/release keeps this in step).
-  readonly property string requiredVersion: "0.2.1"
+  readonly property string requiredVersion: "0.2.2"
   property string cliVersion: ""
   property string cliState: "checking"   // checking, missing, outdated, ok
   readonly property bool cliOk: cliState === "ok" || cliState === "checking"
