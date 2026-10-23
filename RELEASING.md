@@ -31,6 +31,14 @@ copies it everywhere else.
       as one commit, with the same tag. `omarchy plugin update` sees it from
       then on.
 
+5. **Promote it on the Omarchy plugin marketplace.** Until you do, the listing
+   keeps the previous verified snapshot and shows "Update unverified".
+   ```bash
+   scripts/marketplace-promote            # prints the values and a pre-filled form link
+   scripts/marketplace-promote --submit   # or files the verification issue with gh
+   ```
+   The marketplace bot checks the exact commit, and a maintainer approves it.
+
 To check a release without publishing, run the Release workflow by hand
 (Actions → Release → Run workflow). Everything up to the smoke tests runs;
 the publish jobs only run for tags.
