@@ -376,6 +376,34 @@ home = ["192.168.1.0/24"]
 cabin = ["192.168.2.0/24"]
 ```
 
+## macOS
+
+On macOS:
+- **Supported:** the CLI, the watcher (`thermoslop setup` installs a launchd
+  agent) and the MCP server. Claude Desktop and Claude Code can use ThermoSlop
+  locally over stdio.
+- **Not supported:** the Omarchy bar widget. For the menu bar, use SwiftBar
+  with `thermoslop bar --format swiftbar` (see
+  [Other status bars](#other-status-bars)).
+
+**A thermostat pairs with one HomeKit controller.** If your ecobee is in the
+Apple Home app, the Mac (or anything else) can't also pair it with
+ThermoSlop. Two setups work:
+
+1. **ThermoSlop is the controller:**
+   - remove the thermostat from Apple Home (or reset HomeKit on it)
+   - pair it with `thermoslop pair`
+   - Siri and the Home app no longer see it
+2. **The Mac is a client of another ThermoSlop machine** (e.g. an Omarchy or
+   Linux box that holds the pairings):
+   - run `thermoslop mcp --http` there (see
+     [Other machines on your tailnet](#other-machines-on-your-tailnet))
+   - point Claude on the Mac at it
+   - nothing is paired on the Mac, and Apple Home can keep other accessories
+
+If both machines are yours and on Tailscale, option 2 keeps one source of
+truth for pairings and the change log.
+
 ## Several houses
 
 A thermostat belongs to the house whose subnet holds its IP. One controller
