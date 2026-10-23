@@ -98,6 +98,7 @@ reports each, and exits 1 if any failed. With `--json`, failures appear as
 | `thermoslop discover [--all]` | Find HomeKit thermostats (or every HomeKit accessory with `--all`). |
 | `thermoslop pair NAME [--demo]`, `thermoslop unpair -t NAME` | Manage pairings (`--demo`: a pretend thermostat, nothing saved). |
 | `thermoslop watch` | The daemon behind the widget (run by `thermoslop-watch.service`). |
+| `thermoslop bar [--format text\|waybar\|swiftbar] [--follow]` | Status-bar output for Waybar, polybar, i3blocks or SwiftBar (see below). |
 | `thermoslop log [--hours 24] [--source S]` | Recent changes and where they came from (see [Change log](#change-log)). |
 | `thermoslop mcp [--read-only]` | MCP server for AI clients (see below). |
 | `thermoslop dump -t NAME` | Raw HomeKit accessory data, for debugging. |
@@ -300,6 +301,66 @@ The plugin directory is symlinked into `~/.config/omarchy/plugins/`, and the
 shell doesn't hot-reload through that symlink. A rescan keeps the compiled
 widget, so after editing the QML restart the shell with `omarchy restart shell`.
 `omarchy-shell shell summon martellj.thermoslop` then opens the panel.
+
+## Other status bars
+
+`thermoslop bar` prints the thermostats for any bar. It reads only the
+watcher's state file and never contacts the thermostats, so it's cheap to run
+often. It uses the same icon and staleness rules as the Omarchy widget, and
+takes `-t` and `--house` filters.
+
+| Format | Output |
+|---|---|
+| `--format text` (default) | `󰔏 68° 71° │ 55°` |
+| `--format waybar` | JSON: `text`, `tooltip`, and `class`, one of `heating`, `cooling`, `away`, `idle`, `stale`, `empty` |
+| `--format swiftbar` | A title plus a dropdown with actions (±1°, away, resume) |
+
+Add `--follow` to print again whenever the state changes, instead of polling.
+
+**Waybar** (Hyprland, Sway), in `~/.config/waybar/config.jsonc`:
+
+```jsonc
+"custom/thermoslop": {
+  "exec": "thermoslop bar --format waybar --follow",
+  "return-type": "json",
+  "restart-interval": 30,
+  "on-click": "notify-send ThermoSlop \"$(thermoslop status)\"",
+  "on-click-right": "thermoslop away --all",
+  "on-click-middle": "thermoslop resume --all",
+  "on-scroll-up": "thermoslop set +1 -t upstairs",
+  "on-scroll-down": "thermoslop set -1 -t upstairs"
+}
+```
+
+```css
+#custom-thermoslop.heating { color: #faa968; }
+#custom-thermoslop.cooling { color: #6cb6d9; }
+#custom-thermoslop.stale   { opacity: 0.5; }
+```
+
+**i3blocks / polybar:**
+
+```ini
+# i3blocks
+[thermoslop]
+command=thermoslop bar
+interval=60
+
+# polybar
+[module/thermoslop]
+type = custom/script
+exec = thermoslop bar --follow
+tail = true
+```
+
+**SwiftBar (macOS):** save as `thermoslop.30s.sh` in your SwiftBar plugin
+folder and make it executable. SwiftBar runs plugins without your shell's
+PATH, so use the full path:
+
+```sh
+#!/bin/bash
+exec "$HOME/.local/bin/thermoslop" bar --format swiftbar
+```
 
 ## Configuration: `~/.config/thermoslop/config.toml`
 

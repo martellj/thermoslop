@@ -8,6 +8,13 @@ version.
 
 ## [Unreleased]
 
+### Added
+
+- `thermoslop bar` for other status bars: `text` (i3blocks, polybar),
+  `waybar` (JSON with heating/cooling/away/stale classes) and `swiftbar`
+  (macOS menu bar with actions). `--follow` updates on every state change.
+  It reads only the watcher's state file.
+
 ## [0.2.2] - 2026-10-22
 
 ### Changed

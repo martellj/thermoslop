@@ -389,6 +389,14 @@ async def cmd_mcp(args, config) -> int:
     return 0
 
 
+async def cmd_bar(args, config) -> int:
+    from thermoslop import bar
+    from thermoslop.setup import executable
+
+    bar.run(args.format, args.thermostat, args.house, args.follow, executable())
+    return 0
+
+
 async def cmd_setup(args, config) -> int:
     from thermoslop.setup import setup
 
@@ -475,6 +483,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("-n", "--limit", type=int, default=50, help="at most this many entries (newest)")
     s.add_argument("--source", choices=audit.SOURCES, help="only changes from this source")
     s.set_defaults(func=cmd_log)
+
+    s = sub.add_parser("bar", parents=[common], help="status-bar output from the watcher's state (Waybar, SwiftBar, i3blocks…)")
+    s.add_argument("--format", choices=["text", "waybar", "swiftbar"], default="text")
+    s.add_argument("--follow", action="store_true", help="print again whenever the state changes")
+    s.set_defaults(func=cmd_bar)
 
     s = sub.add_parser("setup", parents=[common], help="install the background services (systemd or launchd)")
     s.add_argument("--remove", action="store_true", help="stop and remove them (keeps pairings and history)")
