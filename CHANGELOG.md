@@ -8,6 +8,12 @@ version.
 
 ## [Unreleased]
 
+### Changed
+
+- The panel's "watcher offline" hint now says `run: thermoslop setup`, which
+  works on Linux and macOS and also covers a watcher that was never
+  installed (it said `systemctl --user start thermoslop-watch`).
+
 ## [0.2.1] - 2026-10-22
 
 ### Added

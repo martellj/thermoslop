@@ -364,7 +364,7 @@ Panel {
                     text: parent.fresh
                       ? root.live.length + (root.live.length === 1 ? " zone" : " zones") + " live · "
                         + root.ago(root.now - (root.hostWidget ? root.hostWidget.updatedAt : 0))
-                      : "watcher offline · systemctl --user start thermoslop-watch"
+                      : "watcher offline · run: thermoslop setup"
                     color: root.dim
                     font.family: root.font
                     font.pixelSize: Style.font.bodySmall
