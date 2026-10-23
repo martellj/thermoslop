@@ -41,6 +41,18 @@ thermoslop pair <device id>   # asks for the HomeKit code shown on the thermosta
 - **The Omarchy plugin** can also be added on its own:
   `omarchy plugin add https://github.com/martellj/thermoslop-omarchy --enable`.
 
+**Uninstalling:**
+
+```bash
+thermoslop setup --remove        # stop and remove the services
+uv tool uninstall thermoslop     # or: pipx uninstall thermoslop
+omarchy plugin remove martellj.thermoslop   # on Omarchy
+```
+
+Your pairings, config and history stay in `~/.config/thermoslop`,
+`~/.local/share/thermoslop` and `~/.local/state/thermoslop` until you delete
+them.
+
 From a checkout instead (for development), `./install.sh` makes an editable
 venv, runs `thermoslop setup`, and symlinks the widget from `omarchy/`.
 

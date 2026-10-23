@@ -8,6 +8,16 @@ version.
 
 ## [Unreleased]
 
+### Added
+
+- A preview image of the panel for the Omarchy plugin marketplace.
+
+### Documentation
+
+- Removal instructions and a dependencies section in the plugin README
+  (what it needs, and the commands it runs), and an uninstall section in the
+  main README.
+
 ## [0.2.0] - 2026-10-22
 
 The first public release. Everything below is new compared with the

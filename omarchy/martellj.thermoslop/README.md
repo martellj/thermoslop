@@ -14,6 +14,29 @@ releases. The widget drives the `thermoslop` command, which does the actual
 work. Source, issues and docs live at
 [martellj/thermoslop](https://github.com/martellj/thermoslop).
 
+![The ThermoSlop panel](preview.png)
+
+## Dependencies
+
+The widget runs the `thermoslop` command and reads the state file its watcher
+keeps. It does nothing without them:
+
+- **[thermoslop](https://pypi.org/project/thermoslop/)**, the Python package
+  (CLI, watcher service, MCP server), installed with `uv` or `pipx`. It needs
+  Python 3.11+ and pulls in `aiohomekit` and the `mcp` SDK. It must be the
+  same version as this plugin or newer; the widget shows the upgrade command
+  when it isn't.
+- **HomeKit-capable ecobee thermostats** on a network this machine can reach.
+- **Optional:** Tailscale, to reach thermostats in another house, or to use the
+  MCP server from other machines.
+
+The commands the widget runs:
+- `thermoslop --version`, when it loads
+- `thermoslop discover`, `thermoslop pair`, `thermoslop set`, `thermoslop mode`,
+  `thermoslop away`/`resume`, only when you click or scroll
+
+It never edits Omarchy or system configuration.
+
 ## Install
 
 ```bash
@@ -31,6 +54,21 @@ omarchy plugin add https://github.com/martellj/thermoslop-omarchy --enable
 
 If the widget says "install thermoslop" or shows ↑, the CLI is missing or
 older than the plugin. The panel shows the command to fix it.
+
+## Remove
+
+```bash
+omarchy plugin remove martellj.thermoslop   # the bar widget
+thermoslop setup --remove                   # stop and remove the background services
+uv tool uninstall thermoslop                # the CLI (or: pipx uninstall thermoslop)
+```
+
+Removing the services or the CLI keeps your pairings, config and history in
+`~/.config/thermoslop`, `~/.local/share/thermoslop` and
+`~/.local/state/thermoslop`. Delete those folders too to remove everything.
+Pairing data (`pairing.json`) holds the HomeKit key for your thermostats: to
+revoke it on the thermostat itself, reset HomeKit there (Menu → Settings →
+HomeKit).
 
 ## Using it
 
