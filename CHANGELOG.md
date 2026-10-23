@@ -8,6 +8,8 @@ version.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-22
+
 The first public release. Everything below is new compared with the
 unpublished 0.1.0.
 
@@ -47,6 +49,14 @@ unpublished 0.1.0.
   - pairing from the panel, with a demo mode
   - IPC commands (`omarchy-shell thermoslop open|add|pair`)
   - a banner when the CLI is missing or older than the plugin
+- **Installs from PyPI:** `uv tool install thermoslop`, then `thermoslop
+  setup` installs the background services. Linux gets systemd user units,
+  macOS gets launchd agents (CLI, watcher and MCP server; the bar widget is
+  Omarchy-only), and on Omarchy it offers to add the plugin.
+  `setup --remove` keeps your data.
+- The Omarchy plugin is published on its own at
+  [martellj/thermoslop-omarchy](https://github.com/martellj/thermoslop-omarchy)
+  for `omarchy plugin add`.
 - The ThermoSlop logo (`assets/`).
 
 ### Security

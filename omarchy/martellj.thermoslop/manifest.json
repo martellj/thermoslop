@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "martellj.thermoslop",
   "name": "ThermoSlop",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "John Martell",
   "description": "Unofficial: thermostat temperatures in the bar over local HomeKit (works with ecobee). Not affiliated with ecobee Inc. or Apple Inc.",
   "kinds": [
