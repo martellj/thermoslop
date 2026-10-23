@@ -230,9 +230,11 @@ def write_cache(states: list[dict], remove: list[str] = (), trend_hours: float |
         thermostats.pop(alias, None)
         cache.get("history", {}).pop(alias, None)
     cache["updated_at"] = time.time()
-    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    private_dir(STATE_FILE.parent)
     tmp = STATE_FILE.with_suffix(f".{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(cache, indent=1))
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # occupancy and away status
+    with os.fdopen(fd, "w") as f:
+        f.write(json.dumps(cache, indent=1))
     tmp.replace(STATE_FILE)  # atomic, so the widget never reads half a file
 
 
@@ -406,7 +408,10 @@ class Home:
             check(st, plan)
         chars = {"target": CT.TEMPERATURE_TARGET, "heat": CT.TEMPERATURE_HEATING_THRESHOLD, "cool": CT.TEMPERATURE_COOLING_THRESHOLD}
         await self.write(alias, accessories, {chars[k]: to_c(v, st["units"]) for k, v in plan.items()})
-        return await self._settled(alias, lambda s: s["comfort"] in (None, "hold"))
+        # Confirm the values themselves: an existing hold already reads "hold".
+        keys = {"target": "target", "heat": "heat_setpoint", "cool": "cool_setpoint"}
+        expect = {keys[k]: _setpoint(to_c(v, st["units"]), st["units"]) for k, v in plan.items()}
+        return await self._settled(alias, lambda s: all(s.get(k) == v for k, v in expect.items()))
 
     async def set_mode(self, alias: str, mode: str) -> dict:
         code = {v: k for k, v in HVAC_MODES.items()}[mode]
@@ -423,17 +428,28 @@ class Home:
         return await self._settled(alias, lambda s: s["comfort"] in (None, *COMFORT.values()))
 
     async def _settled(self, alias: str, done: Callable[[dict], bool], timeout: float = 8) -> dict:
-        """Re-read until `done(state)`, or give up after `timeout` and return what it reports.
+        """Re-read until `done(state)` or until `timeout` (slow reads included).
 
-        Thermostats take a moment to reflect a change in their read values; an
-        ecobee3 lite takes 2-4 s to report a comfort change.
+        Returns the last state with `confirmed` true or false. Thermostats take a
+        moment to reflect a change in their read values; an ecobee3 lite takes
+        2-4 s to report a comfort change.
         """
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
+        state = None
         while True:
-            await asyncio.sleep(1)
-            state = await self.state(alias)
-            if done(state) or loop.time() >= deadline:
+            await asyncio.sleep(min(1, max(0, deadline - loop.time())))
+            remaining = deadline - loop.time()
+            if remaining <= 0:
                 break
+            try:
+                state = await asyncio.wait_for(self.state(alias), remaining)
+            except (asyncio.TimeoutError, TimeoutError):
+                break
+            if done(state):
+                write_cache([state])
+                return {**state, "confirmed": True}
+        if state is None:
+            raise ThermoSlopError(f"{alias}: the change was sent, but the thermostat couldn't be read back to confirm it")
         write_cache([state])
-        return state
+        return {**state, "confirmed": False}

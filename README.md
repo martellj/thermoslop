@@ -53,6 +53,17 @@ newly paired thermostats show up in the bar without a manual restart.
 All of them take `--json` (machine-readable; errors come back as
 `{"error": ...}` with exit code 1) and `-t NAME` (alias, prefix ok).
 
+Changes return once the thermostat reads back what was asked. If it hasn't
+within 8 seconds, the command prints what it does read and exits **2** ("sent
+but not confirmed"). Exit 0 means confirmed.
+
+House-wide `home|away|sleep|resume` tries every thermostat even if one fails,
+reports each, and exits 1 if any failed. With `--json`, failures appear as
+`{"alias": ..., "error": ...}` beside the states.
+
+`pair` takes a device id, an address or a name. If two devices share the name
+(a "Main Floor" in each house), it lists them so you can pair by id.
+
 | Command | What it does |
 |---|---|
 | `thermoslop status [--live]` | Temperature, humidity, mode, setpoints, comfort setting, sensors. Uses the watcher's cache when fresh; `--live` asks the thermostat. |
@@ -179,13 +190,20 @@ Oct 22 19:58:40  external external_change  by thermostat, app or schedule
 | `widget` | The bar widget's panel buttons, scroll or clicks |
 | `external` | Not ThermoSlop: the thermostat's screen, the ecobee app, or its schedule |
 
-`external` entries come from the watcher. It compares each thermostat's
-settings on every update, and logs a change when ThermoSlop has no entry for
-that thermostat from about a minute before to 20 seconds after it. HomeKit
-doesn't say who made a change, so a screen, app or schedule change all show as
-`external`. They're logged with the time the watcher saw them. While the
-watcher isn't running, nothing is detected; a change made then shows up once
-it reconnects.
+`external` entries come from the watcher, which compares each thermostat's
+settings on every update.
+- **Attribution:** a change counts as ThermoSlop's only if a ThermoSlop entry
+  for that thermostat, from about a minute before to 20 seconds after it,
+  explains the new values. So an app change made right after a widget change
+  is still caught.
+- **No source detail:** HomeKit doesn't say who made a change, so a screen,
+  app or schedule change all show as `external`, logged with the time the
+  watcher saw them.
+- **Restarts:** when the watcher starts, it compares its first reading with
+  the last cached state. A change made while it was stopped is logged then,
+  unless a ThermoSlop change since that cached reading explains it.
+
+This is a heuristic for your own records, not forensic proof.
 
 ## Bar widget (`omarchy/martellj.thermoslop`)
 
@@ -293,7 +311,7 @@ router makes this rarely needed.
 | `~/.local/share/thermoslop/pairing.json` | HomeKit pairing keys (mode 600 in a 700 directory; treat it like an SSH key, see [SECURITY.md](SECURITY.md)) |
 | `~/.local/share/thermoslop/charmap.json` | aiohomekit accessory cache |
 | `~/.local/state/thermoslop/changes.jsonl` | [Change log](#change-log): every change, from any source (mode 600) |
-| `~/.cache/thermoslop/state.json` | Latest state (each entry has its `house`), written atomically by the watcher and CLI |
+| `~/.cache/thermoslop/state.json` | Latest state and trend history, written atomically by the watcher and CLI (mode 600 in a 700 directory: it reveals occupancy and when you're away) |
 
 ## Development
 

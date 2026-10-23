@@ -17,8 +17,10 @@ anything exploitable. Expect an acknowledgement within a week.
 | `~/.local/state/thermoslop/changes.jsonl` | Change log of every thermostat change, including tailnet logins and device names of MCP callers (mode 600). |
 | `~/.config/thermoslop/config.toml` | Your subnets, houses and MCP allow-list (directory mode 700). |
 
-`~/.cache/thermoslop/state.json` holds only readings for the bar widget, and is
-world-readable like other caches.
+`~/.cache/thermoslop/state.json` holds the latest readings and the trend
+history. That reveals occupancy, when you're away, and the household's
+temperature over time, so it's mode 600 in a 700 directory too. The bar widget
+runs as you and needs no wider access.
 
 **Revoking access:** if `pairing.json` leaks, reset HomeKit on the thermostat
 (on ecobee: Menu → Settings → HomeKit → Reset). That invalidates every

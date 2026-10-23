@@ -48,7 +48,8 @@ def test_outside_change_is_logged_as_external(tmp_path):
 
 def test_thermoslop_change_is_not_external(tmp_path):
     path = tmp_path / "changes.jsonl"
-    ours = lambda: audit.record("widget", "set_temperature", {"temperature": "+1"}, "bar widget", "ok", ["upstairs"], path=path)
+    ours = lambda: audit.record("widget", "set_temperature", {"temperature": "+1"}, "bar widget", "ok", ["upstairs"],
+                                {"upstairs": audit.snapshot(_state(60))}, {"upstairs": audit.snapshot(_state(61))}, path=path)
     _run(path, [_state(60), _state(61), ours])  # logged after the watcher saw it, like the CLI does
     assert [e["source"] for e in _lines(path)] == ["widget"]
 
@@ -129,3 +130,57 @@ def test_cli_and_widget_changes_are_logged(tmp_path, monkeypatch):
     assert cli["before"]["upstairs"]["target"] == 60 and cli["after"]["upstairs"]["target"] == 61
     assert (widget["source"], widget["caller"]) == ("widget", "bar widget")
     assert (failed["outcome"], failed["error"]) == ("failed", "upstairs: can't reach thermostat")
+
+
+
+# ---- audit fixes 3.2 / 3.3: attribution by values, and changes across watcher restarts
+
+def _widget(path, before, after, when=None):
+    audit.record("widget", "set_temperature", {}, "bar widget", "ok", ["upstairs"],
+                 {"upstairs": audit.snapshot(before)}, {"upstairs": audit.snapshot(after)}, path=path, now=when)
+
+
+def test_app_change_right_after_a_widget_change_is_external(tmp_path):
+    path = tmp_path / "changes.jsonl"
+    _run(path, [_state(60), lambda: _widget(path, _state(60), _state(61)), _state(61), _state(64)])
+    entries = _lines(path)
+    assert [e["source"] for e in entries] == ["widget", "external"]
+    assert entries[1]["after"]["upstairs"]["target"] == 64
+
+
+def test_lagging_comfort_is_still_ours(tmp_path):
+    path = tmp_path / "changes.jsonl"
+    # The widget's resume: comfort hold→home and target 61→65. The lite reports
+    # the target first, then the comfort.
+    _run(path, [_state(61, "hold"), lambda: _widget(path, _state(61, "hold"), _state(65, "home")),
+                _state(65, "hold"), _state(65, "home")])
+    assert [e["source"] for e in _lines(path)] == ["widget"]
+
+
+def test_change_while_watcher_stopped_is_external(tmp_path):
+    path = tmp_path / "changes.jsonl"
+
+    async def go():
+        tracker = ChangeTracker("upstairs", path, delay=0.05, baseline={**_state(60), "updated_at": 1000})
+        tracker.observe(_state(63))  # first reading after the restart
+        await asyncio.sleep(0.15)
+    asyncio.run(go())
+    (entry,) = _lines(path)
+    assert entry["source"] == "external" and entry["before"]["upstairs"]["target"] == 60
+
+
+def test_terminal_change_while_watcher_stopped_is_not_external(tmp_path):
+    import time
+
+    path = tmp_path / "changes.jsonl"
+    baseline_time = time.time() - 3600  # the watcher stopped an hour ago
+    audit.record("cli", "set_temperature", {}, "terminal", "ok", ["upstairs"],
+                 {"upstairs": audit.snapshot(_state(60))}, {"upstairs": audit.snapshot(_state(62))},
+                 path=path, now=baseline_time + 600)  # long outside the normal 70 s window
+
+    async def go():
+        tracker = ChangeTracker("upstairs", path, delay=0.05, baseline={**_state(60), "updated_at": baseline_time})
+        tracker.observe(_state(62))
+        await asyncio.sleep(0.15)
+    asyncio.run(go())
+    assert [e["source"] for e in _lines(path)] == ["cli"]

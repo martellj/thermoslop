@@ -28,8 +28,9 @@ STATE_DIR = _xdg("XDG_STATE_HOME", ".local/state") / APP
 AUDIT_FILE = STATE_DIR / "changes.jsonl"
 
 # Readable by the owner only: the pairing key (full control of the thermostats),
-# config, and the audit log of tailnet callers. The cache holds only readings.
-PRIVATE_DIRS = (CONFIG_DIR, DATA_DIR, STATE_DIR)
+# config, the change log (tailnet callers), and the state cache, which reveals
+# occupancy, away status and the household's temperature history.
+PRIVATE_DIRS = (CONFIG_DIR, DATA_DIR, STATE_DIR, CACHE_DIR)
 
 
 def private_dir(path: Path) -> Path:
@@ -44,7 +45,7 @@ def secure_existing() -> None:
     for directory in PRIVATE_DIRS:
         if directory.is_dir():
             os.chmod(directory, 0o700)
-    for path in (PAIRING_FILE, AUDIT_FILE, AUDIT_FILE.with_suffix(".jsonl.1")):
+    for path in (PAIRING_FILE, AUDIT_FILE, AUDIT_FILE.with_suffix(".jsonl.1"), STATE_FILE):
         if path.exists():
             os.chmod(path, 0o600)
 

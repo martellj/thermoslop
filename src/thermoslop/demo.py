@@ -17,7 +17,7 @@ from collections.abc import Awaitable, Callable
 
 from aiohomekit.model.categories import Categories
 
-from thermoslop.discovery import Device
+from thermoslop.discovery import Device, choose
 from thermoslop.homekit import ThermoSlopError, format_pin, slugify
 
 DEMO_CODE = "314-15-926"
@@ -34,9 +34,7 @@ def devices() -> list[Device]:
 
 async def pair(name: str, alias: str | None, get_pin: Callable[[], Awaitable[str]], on_code_needed) -> dict:
     """Walk through pairing with the pretend thermostat; returns its state."""
-    device = next((d for d in devices() if slugify(d.name) == slugify(name) or name.lower() in (d.id.lower(), d.address)), None)
-    if device is None:
-        raise ThermoSlopError(f"no device named {name!r} found; run `thermoslop discover --demo`")
+    device = choose(devices(), name)
     if device.paired:
         raise ThermoSlopError(f"{device.name} is already paired with another controller (Apple Home?). Remove it there first.")
     await asyncio.sleep(STEP)  # pair-setup starts; the thermostat shows a fresh code

@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 
 from thermoslop import APP, audit, discovery, ops
@@ -97,21 +98,34 @@ def _logged_args(args) -> dict:
     return {k: getattr(args, k) for k in keys if getattr(args, k, None) not in (None, False)}
 
 
-async def logged(args, tool: str, change):
-    """Run a change from the CLI or widget and record it in the change log."""
+async def logged(args, tool: str, change, thermostats: list[str] = ()):
+    """Run a change from the CLI or widget and record it in the change log.
+
+    `thermostats` names the target when it's known up front, so a failure is
+    logged against it.
+    """
     source, caller = _source()
     before = {alias: audit.snapshot(s) for alias, s in read_cache().get("thermostats", {}).items()}
     try:
         result = await change()
     except ThermoSlopError as e:
-        audit.record(source, tool, _logged_args(args), caller, "failed", error=str(e))
+        audit.record(source, tool, _logged_args(args), caller, "failed", thermostats, error=str(e))
         raise
     states = result if isinstance(result, list) else [result]
     aliases = [s["alias"] for s in states if "alias" in s]
     after = {s["alias"]: audit.snapshot(s) for s in states if "mode" in s}
-    audit.record(source, tool, _logged_args(args), caller, "ok", aliases,
+    outcome = "unconfirmed" if any(s.get("confirmed") is False for s in states) else "ok"
+    audit.record(source, tool, _logged_args(args), caller, outcome, aliases,
                  {a: before.get(a) for a in aliases}, after or None)
     return result
+
+
+def unconfirmed(states: list[dict]) -> int:
+    """Warn about changes the thermostat didn't confirm; the exit code to use (2 or 0)."""
+    missed = [s for s in states if s.get("confirmed") is False]
+    for s in missed:
+        print(f"{APP}: {s['alias']}: sent, but it still reads: {format_state(s)}", file=sys.stderr)
+    return 2 if missed else 0
 
 
 # ---- commands ----------------------------------------------------------------
@@ -163,6 +177,27 @@ async def cmd_discover(args, config) -> int:
     return 0
 
 
+async def read_line() -> str:
+    """One line of stdin, without blocking shutdown.
+
+    asyncio.to_thread would put the read on the default executor, and
+    asyncio.run waits for that on exit: Ctrl-C at the code prompt then hung until
+    stdin closed. A daemon thread is simply abandoned.
+    """
+    loop = asyncio.get_running_loop()
+    line = loop.create_future()
+
+    def read() -> None:
+        text = sys.stdin.readline()
+        try:
+            loop.call_soon_threadsafe(lambda: line.done() or line.set_result(text))
+        except RuntimeError:
+            pass  # the loop is gone: we were interrupted
+
+    threading.Thread(target=read, daemon=True).start()
+    return (await line).strip()
+
+
 def _code_needed(args, device, hint: str = "") -> None:
     """Tell the person (or, with --json, the panel) that the code is wanted now."""
     if args.json:
@@ -178,7 +213,7 @@ def _code_needed(args, device, hint: str = "") -> None:
 
 async def cmd_pair(args, config) -> int:
     async def read_pin() -> str:
-        return args.pin or (await asyncio.to_thread(sys.stdin.readline)).strip()
+        return args.pin or await read_line()
 
     if args.demo:
         from thermoslop import demo
@@ -188,11 +223,7 @@ async def cmd_pair(args, config) -> int:
         return 0
 
     devices = await discovery.discover(args.subnet or config.subnets)
-    want = args.device.lower()
-    matches = [d for d in devices if want in (d.id, d.address) or slugify(d.name) == slugify(args.device)]
-    if not matches:
-        raise ThermoSlopError(f"no device named {args.device!r} found; run `thermoslop discover`")
-    device = matches[0]
+    device = discovery.choose(devices, args.device)
     if device.paired:
         raise ThermoSlopError(
             f"{device.name} is already paired with another controller (Apple Home?). Remove it there first."
@@ -251,32 +282,43 @@ async def cmd_set(args, config) -> int:
             home, args.thermostat, args.house, value, relative=relative, heat=args.heat, cool=args.cool
         ))
     emit(args, state, format_state(state))
-    return 0
+    return unconfirmed([state])
 
 
 async def cmd_mode(args, config) -> int:
     async with Home(config) as home:
         state = await logged(args, "set_mode", lambda: ops.set_mode(home, args.mode, args.thermostat, args.house))
     emit(args, state, format_state(state))
-    return 0
+    return unconfirmed([state])
+
+
+async def _each(args, tool: str, home: Home, change) -> int:
+    """Apply `change(alias)` to every selected thermostat, even if one fails.
+
+    Each is logged on its own. Output lists a state per success and
+    {"alias", "error"} per failure; exit 1 if any failed, 2 if any is unconfirmed.
+    """
+    results, failed = [], False
+    for alias in ops.targets(home, args.thermostat, args.house, args.all):
+        try:
+            results.append(await logged(args, tool, lambda: change(alias), [alias]))
+        except ThermoSlopError as e:
+            results.append({"alias": alias, "error": str(e)})
+            failed = True
+    states = [r for r in results if "error" not in r]
+    text = "\n".join([format_states(states)] * bool(states) + [f"{r['alias']}: {r['error']}" for r in results if "error" in r])
+    emit(args, results, text)
+    return 1 if failed else unconfirmed(states)
 
 
 async def cmd_comfort(args, config) -> int:
     async with Home(config) as home:
-        states = await logged(args, "set_comfort", lambda: ops.set_comfort(
-            home, args.comfort, args.thermostat, args.house, all=args.all
-        ))
-    emit(args, states, format_states(states))
-    return 0
+        return await _each(args, "set_comfort", home, lambda alias: home.set_comfort(alias, args.comfort))
 
 
 async def cmd_resume(args, config) -> int:
     async with Home(config) as home:
-        states = await logged(args, "resume_schedule", lambda: ops.resume(
-            home, args.thermostat, args.house, all=args.all
-        ))
-    emit(args, states, format_states(states))
-    return 0
+        return await _each(args, "resume_schedule", home, home.resume)
 
 
 FIELD_NAMES = {"target": "target", "heat_setpoint": "heat", "cool_setpoint": "cool", "mode": "mode", "comfort": "comfort"}
@@ -397,7 +439,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(func=cmd_discover)
 
     s = sub.add_parser("pair", parents=[common], help="pair with a thermostat using its HomeKit code")
-    s.add_argument("device", help="name, IP, or device id from `thermoslop discover`")
+    s.add_argument("device", help="device id, IP, or name from `thermoslop discover` (use the id if names repeat)")
     s.add_argument("--pin", help="HomeKit code XXX-XX-XXX (prompted if omitted)")
     s.add_argument("--alias", help="short name to use (default: slug of the device name)")
     s.add_argument("--subnet", action="append")

@@ -147,6 +147,7 @@ Panel {
   property string pairStage: "idle"     // scanning, list, starting, code, verifying, done, error
   property var found: []
   property string pairName: ""
+  property string pairDevice: ""
   property string pairHint: ""
   property string pairError: ""
   property var paired: null
@@ -166,12 +167,15 @@ Panel {
     discoverProc.running = true
   }
 
-  function beginPair(name) {
-    root.pairName = name
+  // `device` is the discovered device's id (names can repeat across houses);
+  // `name` is only for display.
+  function beginPair(device, name) {
+    root.pairDevice = device
+    root.pairName = name || device
     root.pairHint = ""
     root.pairError = ""
     root.pairStage = "starting"
-    pairProc.command = ["env", "THERMOSLOP_SOURCE=widget", "thermoslop", "pair", name, "--json"].concat(root.demoArgs)
+    pairProc.command = ["env", "THERMOSLOP_SOURCE=widget", "thermoslop", "pair", device, "--json"].concat(root.demoArgs)
     pairProc.running = true
   }
 
@@ -189,7 +193,7 @@ Panel {
   }
 
   // `omarchy-shell thermoslop add` opens the panel on "Add thermostat"
-  // (bindable to a key); `… pair NAME` starts pairing with a found device.
+  // (bindable to a key); `… pair DEVICE` (id, address or unique name) starts pairing.
   // There's a widget (and panel) per monitor, and only one gets the IPC
   // target, so it hands off to the copy the bar picks for the focused screen.
   function visibleCopy() {
@@ -202,7 +206,7 @@ Panel {
     target: "thermoslop"
     function open(): void { root.visibleCopy().open() }
     function add(): void { const p = root.visibleCopy(); p.open(); p.startAdding() }
-    function pair(name: string): void { const p = root.visibleCopy(); p.open(); p.view = "add"; p.beginPair(name) }
+    function pair(device: string): void { const p = root.visibleCopy(); p.open(); p.view = "add"; p.beginPair(device) }
   }
 
   Process {
@@ -791,7 +795,7 @@ Panel {
                         visible: deviceRow.ready
                         text: "PAIR"
                         primary: true
-                        onClicked: root.beginPair(deviceRow.modelData.name)
+                        onClicked: root.beginPair(deviceRow.modelData.id, deviceRow.modelData.name)
                       }
                     }
                   }
@@ -907,7 +911,7 @@ Panel {
                   TextButton {
                     text: "TRY AGAIN"
                     primary: true
-                    onClicked: root.pairName ? root.beginPair(root.pairName) : root.scan()
+                    onClicked: root.pairDevice ? root.beginPair(root.pairDevice, root.pairName) : root.scan()
                   }
                   TextButton {
                     text: "BACK"

@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 
 from thermoslop import audit
-from thermoslop.config import AUDIT_FILE, PAIRING_FILE
+from thermoslop.config import PAIRING_FILE
 from thermoslop.homekit import Home, read_cache, thermostat_state, unavailable_state, write_cache
 
 log = logging.getLogger(__name__)
@@ -34,33 +34,44 @@ ATTRIBUTION_DELAY = 20
 
 
 class ChangeTracker:
-    """Logs a thermostat's setting changes that didn't come from ThermoSlop."""
+    """Logs a thermostat's setting changes that didn't come from ThermoSlop.
 
-    def __init__(self, alias: str, audit_file: Path = AUDIT_FILE, delay: float = ATTRIBUTION_DELAY) -> None:
+    `baseline` is the thermostat's last cached state from before the watcher
+    started, so changes made while it was stopped are caught on its first
+    reading. ThermoSlop entries since `baseline["updated_at"]` can explain those.
+    """
+
+    def __init__(
+        self, alias: str, audit_file: Path | None = None, delay: float = ATTRIBUTION_DELAY, baseline: dict | None = None
+    ) -> None:
         self.alias = alias
         self.audit_file = audit_file
         self.delay = delay
-        self.last: dict | None = None
+        usable = baseline and baseline.get("available")
+        self.last: dict | None = audit.snapshot(baseline) if usable else None
+        self._since: float | None = baseline.get("updated_at") if usable else None
         self._pending: set[asyncio.Task] = set()
 
     def observe(self, state: dict) -> None:
         if not state.get("available"):
             return
         current = audit.snapshot(state)
+        since, self._since = self._since, None  # only the first reading compares with the baseline
         if self.last is None or current == self.last:
             self.last = current
             return
         before, self.last = self.last, current
-        task = asyncio.get_running_loop().create_task(self._attribute(before, current, time.time()))
+        task = asyncio.get_running_loop().create_task(self._attribute(before, current, time.time(), since))
         self._pending.add(task)
         task.add_done_callback(self._pending.discard)
 
-    async def _attribute(self, before: dict, after: dict, seen: float) -> None:
+    async def _attribute(self, before: dict, after: dict, seen: float, since: float | None = None) -> None:
         await asyncio.sleep(self.delay)
+        start = since if since is not None else seen - ATTRIBUTION_LOOKBACK
         ours = any(
-            e["source"] != "external" and e.get("outcome") == "ok" and self.alias in e.get("thermostats", [])
-            and e["time"] <= seen + self.delay
-            for e in audit.entries(self.audit_file, since=seen - ATTRIBUTION_LOOKBACK)
+            e["source"] != "external" and e.get("outcome") in audit.CHANGED and self.alias in e.get("thermostats", [])
+            and e["time"] <= seen + self.delay and audit.explains(e, self.alias, after)
+            for e in audit.entries(self.audit_file, since=start)
         )
         if not ours:
             log.info("%s: changed outside ThermoSlop", self.alias)
@@ -100,7 +111,7 @@ async def watch(home: Home) -> None:
 async def _watch_one(home: Home, alias: str) -> None:
     units, house = home.config.units, home.house(alias)
     trend_hours = home.config.trend_hours
-    tracker = ChangeTracker(alias)
+    tracker = ChangeTracker(alias, baseline=read_cache().get("thermostats", {}).get(alias))
     backoff = 5
     while True:
         unsubscribe = None

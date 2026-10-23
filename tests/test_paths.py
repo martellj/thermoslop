@@ -83,10 +83,11 @@ def test_secure_existing_tightens_old_installs(xdg):
     config.PAIRING_FILE.write_text("{}")
     os.chmod(config.PAIRING_FILE, 0o644)
     config.AUDIT_FILE.write_text("")
+    config.STATE_FILE.write_text("{}")
+    os.chmod(config.STATE_FILE, 0o644)
     config.secure_existing()
-    assert [_mode(d) for d in (config.CONFIG_DIR, config.DATA_DIR, config.STATE_DIR)] == [0o700] * 3
-    assert _mode(config.CACHE_DIR) == 0o755  # readings only, for the widget
-    assert _mode(config.PAIRING_FILE) == _mode(config.AUDIT_FILE) == 0o600
+    assert [_mode(d) for d in (config.CONFIG_DIR, config.DATA_DIR, config.STATE_DIR, config.CACHE_DIR)] == [0o700] * 4
+    assert _mode(config.PAIRING_FILE) == _mode(config.AUDIT_FILE) == _mode(config.STATE_FILE) == 0o600
 
 
 def test_audit_log_is_private(xdg):
@@ -95,3 +96,12 @@ def test_audit_log_is_private(xdg):
 
     Guard(config.McpConfig(), config.AUDIT_FILE).record("set_temperature", {}, "test", "ok", ["upstairs"])
     assert _mode(config.AUDIT_FILE) == 0o600 and _mode(config.STATE_DIR) == 0o700
+
+
+def test_state_cache_is_written_private(xdg, monkeypatch):
+    root, config = xdg
+    import thermoslop.homekit as hk
+
+    monkeypatch.setattr(hk, "STATE_FILE", config.STATE_FILE)
+    hk.write_cache([{"alias": "upstairs", "available": True, "temperature": 70, "updated_at": 1}])
+    assert _mode(config.STATE_FILE) == 0o600 and _mode(config.CACHE_DIR) == 0o700

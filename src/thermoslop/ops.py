@@ -71,16 +71,6 @@ async def set_mode(home: Home, mode: str, thermostat: str | None = None, house: 
     return await home.set_mode(alias, mode)
 
 
-def _targets(home: Home, thermostat: str | None, house: str | None, all: bool) -> list[str]:
+def targets(home: Home, thermostat: str | None, house: str | None, all: bool) -> list[str]:
     # A whole house is as explicit as --all: `away --house cabin` means every cabin thermostat.
     return home.pick(thermostat, house, single=not (all or house))
-
-
-async def set_comfort(
-    home: Home, comfort: str, thermostat: str | None = None, house: str | None = None, all: bool = False
-) -> list[dict]:
-    return [await home.set_comfort(alias, comfort) for alias in _targets(home, thermostat, house, all)]
-
-
-async def resume(home: Home, thermostat: str | None = None, house: str | None = None, all: bool = False) -> list[dict]:
-    return [await home.resume(alias) for alias in _targets(home, thermostat, house, all)]

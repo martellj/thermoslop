@@ -237,3 +237,24 @@ async def locate(device_id: str, last_address: str | None, subnets: list[str]) -
         if dev.id == device_id:
             return dev
     return None
+
+
+def choose(devices: list[Device], wanted: str) -> Device:
+    """The device `wanted` names: a device id, then an address, then a unique name.
+
+    Names aren't unique (two houses can each have a "Main Floor"), so an
+    ambiguous name is an error that lists the candidates to pick by id.
+    """
+    from thermoslop.homekit import ThermoSlopError, slugify
+
+    for match in (lambda d: d.id.lower() == wanted.lower(), lambda d: d.address == wanted):
+        found = [d for d in devices if match(d)]
+        if found:
+            return found[0]
+    named = [d for d in devices if slugify(d.name) == slugify(wanted)]
+    if len(named) == 1:
+        return named[0]
+    if not named:
+        raise ThermoSlopError(f"no device named {wanted!r} found; run `thermoslop discover`")
+    listing = "; ".join(f"{d.name} (id {d.id}, {d.address})" for d in named)
+    raise ThermoSlopError(f"{len(named)} devices are named {wanted!r}: {listing}. Pair by id instead.")

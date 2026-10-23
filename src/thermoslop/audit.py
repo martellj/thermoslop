@@ -24,12 +24,39 @@ from thermoslop.config import private_dir
 
 ROTATE_BYTES = 1_000_000
 SOURCES = ("mcp", "cli", "widget", "external")
+# Outcomes after which the thermostat may have changed: "unconfirmed" means it
+# was written but didn't read back in time, "uncertain" that the write's result
+# is unknown (e.g. a timeout after sending).
+CHANGED = ("ok", "unconfirmed", "uncertain")
 
 
 def snapshot(state: dict) -> dict:
     """The settings a change log entry records before and after."""
     keys = ("mode", "target", "heat_setpoint", "cool_setpoint", "comfort")
     return {k: state.get(k) for k in keys}
+
+
+def explains(entry: dict, alias: str, observed: dict) -> bool:
+    """Could this logged change have produced the settings the watcher saw?
+
+    Every field must hold the entry's after-value or, while the thermostat is
+    still catching up (an ecobee3 lite reports comfort a few seconds after the
+    setpoint), its before-value. Entries without after-values (failed, refused)
+    explain nothing.
+    """
+    after = (entry.get("after") or {}).get(alias)
+    if not after:
+        return False
+    before = (entry.get("before") or {}).get(alias) or {}
+    reached = False
+    for key, value in observed.items():
+        if value == after.get(key):
+            reached = reached or after.get(key) != before.get(key, object())
+            continue
+        if key in before and value == before[key]:
+            continue
+        return False
+    return reached or observed == after
 
 
 def record(
@@ -45,7 +72,7 @@ def record(
     path: Path | None = None,
     now: float | None = None,
 ) -> dict:
-    """outcome: "ok", "refused" or "failed"."""
+    """outcome: one of CHANGED, "refused" or "failed"."""
     path = path or config.AUDIT_FILE
     entry = {
         "time": time.time() if now is None else now,
