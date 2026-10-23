@@ -89,21 +89,32 @@ def text(states: list[dict], now: float) -> str:
 
 EMPTY = "No thermostat data. Is the watcher running? Try: thermoslop setup"
 NO_MATCH = "No thermostats match that thermostat/house filter"
+WATCHER_OFFLINE = "Readings are over 10 minutes old: the watcher looks offline (thermoslop setup)"
+UNREACHABLE = "The watcher can't reach these thermostats; it keeps retrying"
 
 
-def waybar(states: list[dict], now: float, filtered: bool = False) -> str:
+def watcher_live(cache: dict, now: float) -> bool:
+    """The watcher rewrites the file every few minutes even while it can't reach a thermostat."""
+    return now - cache.get("updated_at", 0) < STALE_SECONDS
+
+
+def stale_reason(watcher: bool) -> str:
+    return UNREACHABLE if watcher else WATCHER_OFFLINE
+
+
+def waybar(states: list[dict], now: float, filtered: bool = False, watcher: bool = False) -> str:
     cond = condition(states, now)
     if cond == "empty":
         tooltip = NO_MATCH if filtered else EMPTY
     else:
         lines = [describe(s) for s in states]
         if cond == "stale":
-            lines.append("Readings are over 10 minutes old: the watcher looks offline (thermoslop setup)")
+            lines.append(stale_reason(watcher))
         tooltip = "\n".join(lines)
     return json.dumps({"text": text(states, now), "tooltip": tooltip, "class": [cond], "alt": cond}, ensure_ascii=False)
 
 
-def swiftbar(states: list[dict], now: float, binary: str, filtered: bool = False) -> str:
+def swiftbar(states: list[dict], now: float, binary: str, filtered: bool = False, watcher: bool = False) -> str:
     cond = condition(states, now)
 
     def action(label: str, *args: str) -> str:
@@ -128,16 +139,17 @@ def swiftbar(states: list[dict], now: float, binary: str, filtered: bool = False
     if states:
         lines += ["---", action("Away (all)", "away", "--all"), action("Resume schedule (all)", "resume", "--all")]
     if cond == "stale":
-        lines.append("Readings are over 10 minutes old: the watcher looks offline | color=red")
+        lines.append(f"{stale_reason(watcher)} | color=red")
     lines += ["---", "Refresh | refresh=true"]
     return "\n".join(lines)
 
 
-def render(fmt: str, states: list[dict], now: float, binary: str = "thermoslop", filtered: bool = False) -> str:
+def render(fmt: str, states: list[dict], now: float, binary: str = "thermoslop", filtered: bool = False,
+           watcher: bool = False) -> str:
     if fmt == "waybar":
-        return waybar(states, now, filtered)
+        return waybar(states, now, filtered, watcher)
     if fmt == "swiftbar":
-        return swiftbar(states, now, binary, filtered)
+        return swiftbar(states, now, binary, filtered, watcher)
     return text(states, now)
 
 
@@ -146,7 +158,8 @@ def run(fmt: str, thermostat: str | None, house: str | None, follow: bool, binar
         cache = read_cache()
         states = select(cache, thermostat, house)
         filtered = bool(cache.get("thermostats")) and not states
-        out = render(fmt, states, time.time(), binary, filtered)
+        now = time.time()
+        out = render(fmt, states, now, binary, filtered, watcher_live(cache, now))
         print(out, flush=True)
         if not out and sys.stdout.isatty():  # bars hide an empty module; a person wants to know why
             print(NO_MATCH if filtered else EMPTY, file=sys.stderr)

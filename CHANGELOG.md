@@ -17,6 +17,12 @@ version.
 - With piped input, the pairing prompt ends its line, so the result starts
   on a new one.
 - `thermoslop bar` says why it printed nothing when run in a terminal.
+- The panel said "watcher offline" whenever no thermostat could be reached,
+  for example when you're away from home. It now says it can't reach them and
+  keeps retrying, and saves "watcher offline" for a watcher that has really
+  stopped. `thermoslop bar` makes the same distinction, and the zones pill
+  says OFFLINE rather than IDLE.
+- A long status line in the panel header no longer runs under the zones pill.
 - `thermoslop setup` on distributions without a systemd user session
   (Alpine/OpenRC, Void/runit, containers) crashed with `FileNotFoundError`.
   It now explains how to run `thermoslop watch` under your own service

@@ -26,6 +26,7 @@ Panel {
   readonly property string cliState: hostWidget ? hostWidget.cliState : "ok"
   readonly property string cli: hostWidget ? hostWidget.cli : "THERMOSLOP_SOURCE=widget thermoslop"
   readonly property var live: hostWidget ? hostWidget.live : []
+  readonly property bool watcherLive: hostWidget ? hostWidget.watcherLive : false
   readonly property var history: hostWidget ? hostWidget.history : ({})
   readonly property real trendHours: hostWidget ? hostWidget.trendHours : 24
   readonly property real now: hostWidget ? hostWidget.now : Date.now() / 1000
@@ -96,6 +97,7 @@ Panel {
   function summary() {
     if (root.live.some(t => t.action === "heating")) return "HEATING"
     if (root.live.some(t => t.action === "cooling")) return "COOLING"
+    if (root.zones.length && !root.live.length) return "OFFLINE"
     return "IDLE"
   }
 
@@ -301,6 +303,7 @@ Panel {
 
           // ---- header
           Card {
+            id: headerCard
             width: parent.width
             height: header.implicitHeight + Style.space(24)
 
@@ -361,9 +364,14 @@ Panel {
                     color: parent.fresh ? root.good : root.bad
                   }
                   Text {
+                    // Stays clear of the zones pill on the right.
+                    width: Math.min(implicitWidth, headerCard.width - zonesPill.width - Style.space(110))
+                    elide: Text.ElideRight
                     text: parent.fresh
                       ? root.live.length + (root.live.length === 1 ? " zone" : " zones") + " live · "
                         + root.ago(root.now - (root.hostWidget ? root.hostWidget.updatedAt : 0))
+                      : root.watcherLive && root.zones.length ? "can't reach " + (root.zones.length === 1 ? "thermostat" : "thermostats") + " · retrying"
+                      : root.watcherLive ? "watcher running · no thermostats"
                       : "watcher offline · run: thermoslop setup"
                     color: root.dim
                     font.family: root.font

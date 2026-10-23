@@ -4,7 +4,7 @@ import json
 import subprocess
 import sys
 
-from thermoslop.bar import condition, render, select
+from thermoslop.bar import condition, render, select, watcher_live
 
 NOW = 1_000_000.0
 
@@ -42,6 +42,17 @@ def test_stale_and_empty():
     assert empty == {"text": "", "tooltip": empty["tooltip"], "class": ["empty"], "alt": "empty"}
     assert "watcher" in empty["tooltip"]
     assert "match" in json.loads(render("waybar", [], NOW, filtered=True))["tooltip"]
+
+
+def test_unreachable_is_not_watcher_offline():
+    # The watcher keeps rewriting the file while it retries, so a fresh file with
+    # old readings means the thermostats are out of reach (e.g. away from home).
+    cache = {"updated_at": NOW - 60,
+             "thermostats": {"upstairs": _s("upstairs", 70.9, age=24_000, available=False)}}
+    assert watcher_live(cache, NOW) and not watcher_live({"updated_at": NOW - 900}, NOW)
+    out = json.loads(render("waybar", select(cache), NOW, watcher=True))
+    assert out["class"] == ["stale"] and "can't reach" in out["tooltip"] and "offline" not in out["tooltip"]
+    assert "can't reach" in render("swiftbar", select(cache), NOW, watcher=True)
 
 
 def test_all_away():

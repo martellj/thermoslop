@@ -79,6 +79,9 @@ BarWidget {
   readonly property var shown: thermostats.filter(t => (!only || t.alias === only) && (!house || t.house === house))
   readonly property var houses: [...new Set(shown.map(t => t.house || ""))]
   readonly property var live: shown.filter(t => t.available && now - (t.updated_at || 0) < staleSeconds)
+  // The watcher rewrites the file at least every few minutes, even while it
+  // can't reach a thermostat, so an old file means the watcher itself stopped.
+  readonly property bool watcherLive: now - updatedAt < staleSeconds
   readonly property string scrollTarget: only || (shown.length ? shown[0].alias : "")
   readonly property bool anyAway: live.some(t => t.comfort === "away")
   // `--all`, `--all --house cabin` or `-t upstairs`: what the bar's actions act on.
