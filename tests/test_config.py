@@ -52,3 +52,34 @@ def test_mcp_allow_rejects_weak_identities(entry):
 
 def test_mcp_allow_accepts_logins_and_devices():
     McpConfig(allow=["alice@example.com", "node:nJZFmD3fA721CNTRL@alice@example.com"])
+
+
+def test_version_everywhere():
+    import subprocess
+    import sys
+
+    from thermoslop import __version__
+
+    out = subprocess.run([sys.executable, "-m", "thermoslop", "--version"], capture_output=True, text=True)
+    assert (out.returncode, out.stdout.strip()) == (0, f"thermoslop {__version__}")
+
+
+def test_mcp_server_reports_version(tmp_path):
+    import asyncio
+
+    from mcp.client.client import Client
+
+    from thermoslop import __version__
+    from thermoslop.config import Config, McpConfig
+    from thermoslop.guard import Guard
+    from thermoslop.homekit import Home
+    from thermoslop.mcp_server import ThermostatServer
+
+    server = ThermostatServer(Home(Config()), Guard(McpConfig(), tmp_path / "c.jsonl"))
+
+    async def go():
+        async with Client(server.mcp) as client:
+            return client.server_info
+
+    info = asyncio.run(go())
+    assert (info.name, info.version) == ("thermoslop", __version__)

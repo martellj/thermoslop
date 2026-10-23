@@ -14,7 +14,7 @@ import sys
 import threading
 import time
 
-from thermoslop import APP, audit, discovery, ops
+from thermoslop import APP, __version__, audit, discovery, ops
 from thermoslop.config import CONFIG_FILE, PAIRING_FILE, load_config, migrate_legacy, secure_existing
 from thermoslop.homekit import (
     COMFORT,
@@ -408,6 +408,7 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("-v", "--verbose", action="count", default=0)
 
     p = argparse.ArgumentParser(prog=APP, description=__doc__, parents=[common])
+    p.add_argument("--version", action="version", version=f"{APP} {__version__}")
     sub = p.add_subparsers(dest="command", required=True)
 
     s = sub.add_parser("status", parents=[common], help="current temperature, setpoints, sensors")

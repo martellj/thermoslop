@@ -184,3 +184,17 @@ def test_terminal_change_while_watcher_stopped_is_not_external(tmp_path):
         await asyncio.sleep(0.15)
     asyncio.run(go())
     assert [e["source"] for e in _lines(path)] == ["cli"]
+
+
+
+def test_unconfirmed_change_explains_the_late_value(tmp_path):
+    """Seen live: the readback lagged, so the entry logged the old value (62)
+    while the thermostat went on to 61. That's ThermoSlop's change, not external."""
+    path = tmp_path / "changes.jsonl"
+
+    def unconfirmed():
+        audit.record("widget", "set_temperature", {"temperature": "-1"}, "bar widget", "unconfirmed", ["upstairs"],
+                     {"upstairs": audit.snapshot(_state(62))}, {"upstairs": audit.snapshot(_state(62))}, path=path)
+
+    _run(path, [_state(62), unconfirmed, _state(61)])
+    assert [e["source"] for e in _lines(path)] == ["widget"]

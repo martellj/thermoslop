@@ -42,8 +42,12 @@ def explains(entry: dict, alias: str, observed: dict) -> bool:
     Every field must hold the entry's after-value or, while the thermostat is
     still catching up (an ecobee3 lite reports comfort a few seconds after the
     setpoint), its before-value. Entries without after-values (failed, refused)
-    explain nothing.
+    explain nothing; unconfirmed or uncertain ones explain anything.
     """
+    if entry.get("outcome") in ("unconfirmed", "uncertain"):
+        # The write went out but its result wasn't read back in time, so the
+        # logged after-values may be stale: any change in the window is ours.
+        return True
     after = (entry.get("after") or {}).get(alias)
     if not after:
         return False

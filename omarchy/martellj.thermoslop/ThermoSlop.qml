@@ -29,6 +29,45 @@ BarWidget {
   // A reading older than this means `thermoslop watch` isn't running.
   readonly property int staleSeconds: 600
 
+  // The plugin drives the `thermoslop` CLI and reads its state file, so it
+  // needs a CLI at least as new as itself (scripts/release keeps this in step).
+  readonly property string requiredVersion: "0.1.0"
+  property string cliVersion: ""
+  property string cliState: "checking"   // checking, missing, outdated, ok
+  readonly property bool cliOk: cliState === "ok" || cliState === "checking"
+  readonly property string installHint: "uv tool install thermoslop && thermoslop setup"
+  readonly property string upgradeHint: "uv tool upgrade thermoslop"
+
+  function olderThan(a, b) {
+    const x = a.split(".").map(Number), y = b.split(".").map(Number)
+    for (let i = 0; i < 3; i++) {
+      if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) < (y[i] || 0)
+    }
+    return false
+  }
+
+  Process {
+    id: versionProc
+    // Through sh, which always starts and exits 127 when thermoslop is missing:
+    // a missing executable on its own never reports back.
+    command: ["sh", "-c", "thermoslop --version"]
+    running: true
+    stdout: StdioCollector {
+      onStreamFinished: {
+        const m = /thermoslop (\d+\.\d+\.\d+)/.exec(text || "")
+        root.cliVersion = m ? m[1] : ""
+        root.cliState = !m ? "missing" : root.olderThan(m[1], root.requiredVersion) ? "outdated" : "ok"
+      }
+    }
+    onExited: function(code) { if (code !== 0) root.cliState = "missing" }
+  }
+
+  Timer {
+    interval: 10000
+    running: root.cliState === "checking"
+    onTriggered: root.cliState = "missing"
+  }
+
   property var thermostats: []
   property var history: ({})
   // The watcher's [trend_hours] (config.toml); 0 = no trend line.
@@ -73,18 +112,19 @@ BarWidget {
   }
 
   function label() {
+    if (cliState === "missing") return "󰔏 install thermoslop"
     if (!shown.length) return ""
     const temps = houses.map(h => shown.filter(t => (t.house || "") === h)
       .map(t => t.available ? deg(t.temperature) : "?").join(" "))
     const pending = pendingDelta ? "  →" + (pendingDelta > 0 ? "+" : "") + pendingDelta : ""
-    return icon() + " " + temps.join(" │ ") + pending
+    return icon() + " " + temps.join(" │ ") + pending + (cliState === "outdated" ? "  ↑" : "")
   }
 
   // Changes made here are logged with source "widget" (`thermoslop log`).
   readonly property string cli: "THERMOSLOP_SOURCE=widget thermoslop"
 
   function thermoslop(args) {
-    if (root.bar) root.bar.run(root.cli + " " + args)
+    if (root.bar && root.cliOk) root.bar.run(root.cli + " " + args)
   }
 
   // ---- panel hosting (same contract as Omarchy's weather widget)
@@ -153,7 +193,9 @@ BarWidget {
     }
   }
 
-  visible: shown.length > 0
+  // Also shown without any thermostats when the CLI is missing or too old, so
+  // the panel can say how to fix it.
+  visible: shown.length > 0 || cliState === "missing" || cliState === "outdated"
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
@@ -164,7 +206,7 @@ BarWidget {
     text: root.label()
     fontSize: Style.font.caption
     horizontalMargin: 6
-    dimmed: root.live.length === 0
+    dimmed: root.live.length === 0 || !root.cliOk
     // The panel is the detail view.
     tooltipText: ""
 
@@ -175,7 +217,7 @@ BarWidget {
     }
 
     onWheelMoved: function(delta) {
-      if (!root.live.length) return
+      if (!root.live.length || !root.cliOk) return
       root.pendingDelta += delta > 0 ? 1 : -1
       sendDelta.restart()
     }

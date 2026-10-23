@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+"""Fail unless every place that carries ThermoSlop's version agrees.
+
+  scripts/check-version            the package, plugin manifest and widget agree
+  scripts/check-version v0.2.0     ...and match this release tag
+
+Sources: src/thermoslop/__init__.py (__version__, the single source),
+omarchy/martellj.thermoslop/manifest.json ("version"), and the widget's
+`requiredVersion` (the oldest CLI the plugin works with: the same release).
+"""
+
+import json
+import re
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+def versions() -> dict[str, str]:
+    init = (ROOT / "src/thermoslop/__init__.py").read_text()
+    manifest = json.loads((ROOT / "omarchy/martellj.thermoslop/manifest.json").read_text())
+    qml = (ROOT / "omarchy/martellj.thermoslop/ThermoSlop.qml").read_text()
+    found = {
+        "__version__": re.search(r'^__version__ = "([^"]+)"', init, re.M),
+        "manifest.json": manifest.get("version"),
+        "ThermoSlop.qml requiredVersion": re.search(r'property string requiredVersion: "([^"]+)"', qml),
+    }
+    return {k: (v.group(1) if hasattr(v, "group") else v) or "missing" for k, v in found.items()}
+
+
+def main() -> int:
+    found = versions()
+    if len(sys.argv) > 1:
+        found["tag"] = sys.argv[1].removeprefix("v")
+    if len(set(found.values())) != 1:
+        for where, version in found.items():
+            print(f"  {where}: {version}", file=sys.stderr)
+        print("check-version: versions disagree", file=sys.stderr)
+        return 1
+    print(f"check-version: {next(iter(found.values()))} everywhere")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

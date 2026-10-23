@@ -21,6 +21,9 @@ Panel {
   readonly property var barIdentity: hostWidget || root
 
   readonly property var zones: hostWidget ? hostWidget.shown : []
+  // Controls are off while the CLI is missing or older than the plugin.
+  readonly property bool cliOk: hostWidget ? hostWidget.cliOk : true
+  readonly property string cliState: hostWidget ? hostWidget.cliState : "ok"
   readonly property string cli: hostWidget ? hostWidget.cli : "THERMOSLOP_SOURCE=widget thermoslop"
   readonly property var live: hostWidget ? hostWidget.live : []
   readonly property var history: hostWidget ? hostWidget.history : ({})
@@ -97,6 +100,7 @@ Panel {
   }
 
   function nudge(alias, step) {
+    if (!root.cliOk) return
     const next = Object.assign({}, root.pending)
     next[alias] = (next[alias] || 0) + step
     if (next[alias] === 0) delete next[alias]
@@ -105,7 +109,7 @@ Panel {
   }
 
   function run(args) {
-    if (root.bar) root.bar.run(args)
+    if (root.bar && root.cliOk) root.bar.run(args)
   }
 
   // Run one `thermoslop` command per thermostat shown, one after another.
@@ -155,6 +159,7 @@ Panel {
   readonly property var demoArgs: pairingDemo ? ["--demo"] : []
 
   function startAdding() {
+    if (!root.cliOk) return
     root.view = "add"
     scan()
   }
@@ -376,6 +381,48 @@ Panel {
               text: root.zones.length + " ZONES │ " + root.summary()
               tint: root.summary() === "COOLING" ? root.cool : root.summary() === "HEATING" ? root.accent : root.fg
               large: true
+            }
+          }
+
+          // ---- the CLI is missing or too old
+          Card {
+            visible: root.cliState === "missing" || root.cliState === "outdated"
+            width: parent.width
+            height: cliColumn.implicitHeight + Style.space(28)
+            border.color: Util.alpha(root.bad, 0.5)
+
+            Column {
+              id: cliColumn
+              anchors.fill: parent
+              anchors.margins: Style.space(14)
+              spacing: Style.space(8)
+              Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                text: root.cliState === "missing"
+                  ? "The thermoslop command isn't installed. The bar widget needs it:"
+                  : "thermoslop " + (root.hostWidget ? root.hostWidget.cliVersion : "") + " is older than this plugin ("
+                    + (root.hostWidget ? root.hostWidget.requiredVersion : "") + "). Update it:"
+                color: root.fg
+                font.family: root.font
+                font.pixelSize: Style.font.body
+              }
+              Text {
+                width: parent.width
+                wrapMode: Text.WrapAnywhere
+                text: root.hostWidget ? (root.cliState === "missing" ? root.hostWidget.installHint : root.hostWidget.upgradeHint) : ""
+                color: root.accent
+                font.family: root.font
+                font.pixelSize: Style.font.body
+                font.bold: true
+              }
+              Text {
+                visible: root.cliState === "missing"
+                text: "Then restart the shell: omarchy restart shell"
+                color: root.dim
+                font.family: root.font
+                font.pixelSize: Style.font.bodySmall
+              }
             }
           }
 
@@ -655,6 +702,7 @@ Panel {
 
           TextButton {
             visible: root.view === "zones"
+            enabled: root.cliOk
             anchors.horizontalCenter: parent.horizontalCenter
             text: "+ ADD THERMOSTAT"
             onClicked: root.startAdding()
