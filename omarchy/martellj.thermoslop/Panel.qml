@@ -20,6 +20,7 @@ Panel {
   readonly property var barIdentity: hostWidget || root
 
   readonly property var zones: hostWidget ? hostWidget.shown : []
+  readonly property string cli: hostWidget ? hostWidget.cli : "THERMOSLOP_SOURCE=widget thermoslop"
   readonly property var live: hostWidget ? hostWidget.live : []
   readonly property var history: hostWidget ? hostWidget.history : ({})
   readonly property real trendHours: hostWidget ? hostWidget.trendHours : 24
@@ -108,7 +109,7 @@ Panel {
 
   // Run one `thermoslop` command per thermostat shown, one after another.
   function forEachZone(argsFor) {
-    const commands = root.zones.filter(t => t.available).map(t => "thermoslop " + argsFor(t) + " -t " + Util.shellQuote(t.alias))
+    const commands = root.zones.filter(t => t.available).map(t => root.cli + " " + argsFor(t) + " -t " + Util.shellQuote(t.alias))
     if (commands.length) run(commands.join("; "))
   }
 
@@ -122,7 +123,7 @@ Panel {
     onTriggered: {
       const commands = Object.keys(root.pending).map(alias => {
         const d = root.pending[alias]
-        return "thermoslop set " + (d > 0 ? "+" : "") + d + " -t " + Util.shellQuote(alias)
+        return root.cli + " set " + (d > 0 ? "+" : "") + d + " -t " + Util.shellQuote(alias)
       })
       if (commands.length) root.run(commands.join("; "))
       // Keep showing the pending value until the watcher reports the change.

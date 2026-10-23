@@ -39,7 +39,7 @@ HomeKit controller, so it has to be removed from Apple Home before pairing
 here, and pairing it back to Apple Home takes it away from this box.
 
 Upgrading from before the rename (when the project was called `ecobee`):
-rerun `./install.sh`. It moves the config, pairings, cache and audit log to
+rerun `./install.sh`. It moves the config, pairings, cache and change log to
 the `thermoslop` locations, swaps the services, and renames the bar entry in
 place, so nothing has to be paired again.
 
@@ -62,6 +62,7 @@ All of them take `--json` (machine-readable; errors come back as
 | `thermoslop discover [--all]` | Find HomeKit thermostats (or every HomeKit accessory with `--all`). |
 | `thermoslop pair NAME`, `thermoslop unpair -t NAME` | Manage pairings. |
 | `thermoslop watch` | The daemon behind the widget (run by `thermoslop-watch.service`). |
+| `thermoslop log [--hours 24] [--source S]` | Recent changes and where they came from (see [Change log](#change-log)). |
 | `thermoslop mcp [--read-only]` | MCP server for AI clients (see below). |
 | `thermoslop dump -t NAME` | Raw HomeKit accessory data, for debugging. |
 
@@ -129,7 +130,7 @@ On the other machine, point the client at `http://<node>:8765/mcp`, where
 claude mcp add --scope user --transport http thermoslop http://omarchy:8765/mcp
 ```
 
-The audit log records these callers as `login on node`.
+The change log records these callers as `login on node`.
 
 ### Guardrails
 
@@ -146,14 +147,43 @@ max_changes_per_hour = 20    # each thermostat changed counts once; survives res
 ```
 
 Refusals come back as tool errors that explain why, so the agent can tell you
-instead of retrying. Every attempted change is appended to
-`~/.local/state/thermoslop/changes.jsonl` with the time, tool, arguments, caller,
-outcome, and the thermostat's mode and setpoints before and after. That
-includes refusals and failures.
+instead of retrying. Every attempted change, refusals and failures included,
+goes to the [change log](#change-log) with source `mcp`. The rate limit counts
+only MCP changes.
 
 Comfort changes are verified by reading the thermostat back. An ecobee3 lite
 (firmware 4.8.70240) does apply away, home and resume, but takes 2–4 s to
 report them. Writes wait up to 8 s for the thermostat to report the change.
+
+## Change log
+
+Every change to a thermostat is recorded in
+`~/.local/state/thermoslop/changes.jsonl`, whatever made it, with the time, the
+caller, the outcome, and the mode, setpoints and comfort setting before and
+after. `thermoslop log` shows it:
+
+```
+$ thermoslop log
+Oct 22 19:55:04  cli      set_temperature  by terminal (alice)
+    upstairs: target 60→61, heat 60→61
+Oct 22 19:58:40  external external_change  by thermostat, app or schedule
+    upstairs: target 61→62, heat 61→62
+```
+
+| Source | Where the change came from |
+|---|---|
+| `mcp` | An AI client through `thermoslop mcp` (caller: the local client, or `login on node` over the tailnet) |
+| `cli` | `thermoslop` in a terminal or script |
+| `widget` | The bar widget's panel buttons, scroll or clicks |
+| `external` | Not ThermoSlop: the thermostat's screen, the ecobee app, or its schedule |
+
+`external` entries come from the watcher. It compares each thermostat's
+settings on every update, and logs a change when ThermoSlop has no entry for
+that thermostat from about a minute before to 20 seconds after it. HomeKit
+doesn't say who made a change, so a screen, app or schedule change all show as
+`external`. They're logged with the time the watcher saw them. While the
+watcher isn't running, nothing is detected; a change made then shows up once
+it reconnects.
 
 ## Bar widget (`omarchy/martellj.thermoslop`)
 
@@ -240,7 +270,7 @@ router makes this rarely needed.
 |---|---|
 | `~/.local/share/thermoslop/pairing.json` | HomeKit pairing keys (mode 600 in a 700 directory; treat it like an SSH key, see [SECURITY.md](SECURITY.md)) |
 | `~/.local/share/thermoslop/charmap.json` | aiohomekit accessory cache |
-| `~/.local/state/thermoslop/changes.jsonl` | Audit log of changes made through MCP |
+| `~/.local/state/thermoslop/changes.jsonl` | [Change log](#change-log): every change, from any source (mode 600) |
 | `~/.cache/thermoslop/state.json` | Latest state (each entry has its `house`), written atomically by the watcher and CLI |
 
 ## Development

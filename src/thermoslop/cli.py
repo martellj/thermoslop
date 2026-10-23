@@ -9,15 +9,18 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import sys
+import time
 
-from thermoslop import APP, discovery, ops
+from thermoslop import APP, audit, discovery, ops
 from thermoslop.config import CONFIG_FILE, load_config, migrate_legacy, secure_existing
 from thermoslop.homekit import (
     COMFORT,
     HVAC_MODES,
     ThermoSlopError,
     Home,
+    read_cache,
     slugify,
     write_cache,
 )
@@ -79,6 +82,38 @@ def emit(args, payload, text: str) -> None:
     print(json.dumps(payload, indent=1) if args.json else text)
 
 
+# ---- change log --------------------------------------------------------------
+
+
+def _source() -> tuple[str, str]:
+    """(source, caller) for the change log: the bar widget sets THERMOSLOP_SOURCE."""
+    if os.environ.get("THERMOSLOP_SOURCE") == "widget":
+        return "widget", "bar widget"
+    return "cli", f"terminal ({os.environ.get('USER', '?')})"
+
+
+def _logged_args(args) -> dict:
+    keys = ("temperature", "heat", "cool", "mode", "comfort", "thermostat", "house", "all", "device", "alias")
+    return {k: getattr(args, k) for k in keys if getattr(args, k, None) not in (None, False)}
+
+
+async def logged(args, tool: str, change):
+    """Run a change from the CLI or widget and record it in the change log."""
+    source, caller = _source()
+    before = {alias: audit.snapshot(s) for alias, s in read_cache().get("thermostats", {}).items()}
+    try:
+        result = await change()
+    except ThermoSlopError as e:
+        audit.record(source, tool, _logged_args(args), caller, "failed", error=str(e))
+        raise
+    states = result if isinstance(result, list) else [result]
+    aliases = [s["alias"] for s in states if "alias" in s]
+    after = {s["alias"]: audit.snapshot(s) for s in states if "mode" in s}
+    audit.record(source, tool, _logged_args(args), caller, "ok", aliases,
+                 {a: before.get(a) for a in aliases}, after or None)
+    return result
+
+
 # ---- commands ----------------------------------------------------------------
 
 
@@ -121,8 +156,11 @@ async def cmd_pair(args, config) -> int:
         alias = args.alias or slugify(device.name)
         if not args.alias and alias in home.aliases() and (house := config.house_of(device.address)):
             alias = f"{house}-{alias}"  # e.g. a second house's "Main Floor"
-        await home.pair(device, alias, get_pin)
-        state = await home.state(alias)
+        async def pair() -> dict:
+            await home.pair(device, alias, get_pin)
+            return await home.state(alias)
+
+        state = await logged(args, "pair", pair)
     write_cache([state])
     emit(args, state, f"Paired {device.name} as {alias!r}.\n{format_state(state)}")
     return 0
@@ -131,7 +169,12 @@ async def cmd_pair(args, config) -> int:
 async def cmd_unpair(args, config) -> int:
     async with Home(config) as home:
         (alias,) = home.pick(args.thermostat, args.house, single=True)
-        await home.unpair(alias)
+
+        async def unpair() -> dict:
+            await home.unpair(alias)
+            return {"alias": alias}
+
+        await logged(args, "unpair", unpair)
     emit(args, {"unpaired": alias}, f"Unpaired {alias}.")
     return 0
 
@@ -154,31 +197,83 @@ def _parse_temp(text: str) -> tuple[float, bool]:
 async def cmd_set(args, config) -> int:
     value, relative = _parse_temp(args.temperature) if args.temperature else (None, False)
     async with Home(config) as home:
-        state = await ops.set_temperature(
+        state = await logged(args, "set_temperature", lambda: ops.set_temperature(
             home, args.thermostat, args.house, value, relative=relative, heat=args.heat, cool=args.cool
-        )
+        ))
     emit(args, state, format_state(state))
     return 0
 
 
 async def cmd_mode(args, config) -> int:
     async with Home(config) as home:
-        state = await ops.set_mode(home, args.mode, args.thermostat, args.house)
+        state = await logged(args, "set_mode", lambda: ops.set_mode(home, args.mode, args.thermostat, args.house))
     emit(args, state, format_state(state))
     return 0
 
 
 async def cmd_comfort(args, config) -> int:
     async with Home(config) as home:
-        states = await ops.set_comfort(home, args.comfort, args.thermostat, args.house, all=args.all)
+        states = await logged(args, "set_comfort", lambda: ops.set_comfort(
+            home, args.comfort, args.thermostat, args.house, all=args.all
+        ))
     emit(args, states, format_states(states))
     return 0
 
 
 async def cmd_resume(args, config) -> int:
     async with Home(config) as home:
-        states = await ops.resume(home, args.thermostat, args.house, all=args.all)
+        states = await logged(args, "resume_schedule", lambda: ops.resume(
+            home, args.thermostat, args.house, all=args.all
+        ))
     emit(args, states, format_states(states))
+    return 0
+
+
+FIELD_NAMES = {"target": "target", "heat_setpoint": "heat", "cool_setpoint": "cool", "mode": "mode", "comfort": "comfort"}
+
+
+def _changes(before: dict | None, after: dict | None) -> str:
+    """'target 60→61, comfort hold→away' for one thermostat."""
+    if not after:
+        return ""
+    before = before or {}
+    parts = []
+    for key, label in FIELD_NAMES.items():
+        old, new = before.get(key), after.get(key)
+        if old != new:
+            parts.append(f"{label} {_fmt(old)}→{_fmt(new)}")
+    return ", ".join(parts) or "no change"
+
+
+def _fmt(value) -> str:
+    if isinstance(value, float):
+        return f"{value:.1f}".rstrip("0").rstrip(".")
+    return "—" if value is None else str(value)
+
+
+def format_entry(e: dict) -> list[str]:
+    when = time.strftime("%b %d %H:%M:%S", time.localtime(e.get("time", 0)))
+    outcome = "" if e.get("outcome") == "ok" else f" [{e.get('outcome')}]"
+    head = f"{when}  {e['source']:<8} {e.get('tool', '?')}{outcome}  by {e.get('caller', '?')}"
+    lines = [head]
+    for alias in e.get("thermostats") or []:
+        detail = _changes((e.get("before") or {}).get(alias), (e.get("after") or {}).get(alias))
+        lines.append(f"    {alias}: {detail}" if detail else f"    {alias}")
+    if e.get("error"):
+        lines.append(f"    {e['error']}")
+    return lines
+
+
+async def cmd_log(args, config) -> int:
+    found = audit.entries(since=time.time() - args.hours * 3600)
+    if args.thermostat:
+        key = slugify(args.thermostat)
+        found = [e for e in found if any(a.startswith(key) for a in e.get("thermostats", []))]
+    if args.source:
+        found = [e for e in found if e["source"] == args.source]
+    found = found[-args.limit:]
+    lines = [line for e in found for line in format_entry(e)] or [f"no changes in the last {args.hours:g} hours"]
+    emit(args, found, "\n".join(lines))
     return 0
 
 
@@ -269,6 +364,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--bind", help="Tailscale address to listen on (default: `tailscale ip -4`)")
     s.add_argument("--port", type=int, help="port (default: [mcp] http_port, 8765)")
     s.set_defaults(func=cmd_mcp)
+
+    s = sub.add_parser("log", parents=[common], help="recent changes, from any source (terminal, widget, MCP, thermostat/app)")
+    s.add_argument("--hours", type=float, default=24, help="how far back (default 24)")
+    s.add_argument("-n", "--limit", type=int, default=50, help="at most this many entries (newest)")
+    s.add_argument("--source", choices=audit.SOURCES, help="only changes from this source")
+    s.set_defaults(func=cmd_log)
 
     s = sub.add_parser("dump", parents=[common], help="raw HomeKit accessory data (debugging)")
     s.set_defaults(func=cmd_dump)

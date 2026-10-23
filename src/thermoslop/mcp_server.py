@@ -18,7 +18,8 @@ from mcp_types import ToolAnnotations
 from pydantic import Field
 
 from thermoslop import APP, ops
-from thermoslop.guard import Guard, Refused, snapshot
+from thermoslop.audit import snapshot
+from thermoslop.guard import Guard, Refused
 from thermoslop.homekit import COMFORT, ThermoSlopError, Home, read_cache
 
 log = logging.getLogger(__name__)

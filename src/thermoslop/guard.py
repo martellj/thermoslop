@@ -1,24 +1,22 @@
 """Guardrails for changes made through the MCP server.
 
 Limits come from `[mcp]` in the config. Every attempted change, refused or
-not, is appended to the audit log; the rate limit counts successful changes in
-that log, so restarting the server doesn't reset it.
+not, goes to the change log (audit.py) with source "mcp"; the rate limit counts
+successful MCP changes in that log, so restarting the server doesn't reset it.
 """
 
 from __future__ import annotations
 
-import json
-import os
 import time
 from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 
-from thermoslop.config import AUDIT_FILE, McpConfig, degrees_in, private_dir
+from thermoslop import audit
+from thermoslop.config import AUDIT_FILE, McpConfig, degrees_in
 from thermoslop.homekit import ThermoSlopError
 
 WINDOW = 3600
-ROTATE_BYTES = 1_000_000
 SETPOINT_NAMES = {"target": "target", "heat": "heat setpoint", "cool": "cool setpoint"}
 
 
@@ -28,12 +26,6 @@ class Refused(ThermoSlopError):
 
 def _num(value: float) -> str:
     return f"{value:.1f}".rstrip("0").rstrip(".")
-
-
-def snapshot(state: dict) -> dict:
-    """The parts of a state the audit log records before and after a change."""
-    keys = ("mode", "target", "heat_setpoint", "cool_setpoint", "comfort")
-    return {k: state.get(k) for k in keys}
 
 
 class Guard:
@@ -79,7 +71,7 @@ class Guard:
                 f"[mcp] max_changes_per_hour); next change allowed in {max(1, round(wait / 60))} min"
             )
 
-    # -- audit log --
+    # -- change log --
 
     def record(
         self,
@@ -92,43 +84,17 @@ class Guard:
         after: dict | None = None,
         error: str | None = None,
     ) -> None:
-        """outcome: "ok", "refused" or "failed". Only "ok" counts toward the rate limit."""
+        """Log an MCP change. Only successful ones count toward the rate limit."""
         now = self.clock()
-        entry = {
-            "time": now,
-            "tool": tool,
-            "args": args,
-            "caller": caller,
-            "outcome": outcome,
-            "thermostats": list(thermostats),
-            "before": before,
-            "after": after,
-        }
-        if error:
-            entry["error"] = error
-        private_dir(self.audit_file.parent)
-        if self.audit_file.exists() and self.audit_file.stat().st_size > ROTATE_BYTES:
-            self.audit_file.replace(self.audit_file.with_suffix(".jsonl.1"))
-        # 600: it records tailnet logins and node names.
-        fd = os.open(self.audit_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-        with os.fdopen(fd, "a") as f:
-            f.write(json.dumps(entry) + "\n")
+        audit.record("mcp", tool, args, caller, outcome, thermostats, before, after, error, self.audit_file, now)
         if outcome == "ok":
             self._changes.extend([now] * max(1, len(thermostats)))
 
     def _logged_changes(self) -> list[float]:
-        since = self.clock() - WINDOW
+        # The limit is on agents: changes from the terminal, the widget or the
+        # thermostat itself don't use it up.
         times: list[float] = []
-        for path in (self.audit_file.with_suffix(".jsonl.1"), self.audit_file):
-            try:
-                lines = path.read_text().splitlines()
-            except FileNotFoundError:
-                continue
-            for line in lines:
-                try:
-                    entry = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if entry.get("outcome") == "ok" and entry.get("time", 0) > since:
-                    times += [entry["time"]] * max(1, len(entry.get("thermostats", [])))
+        for entry in audit.entries(self.audit_file, since=self.clock() - WINDOW):
+            if entry["source"] == "mcp" and entry.get("outcome") == "ok":
+                times += [entry["time"]] * max(1, len(entry.get("thermostats", [])))
         return sorted(times)

@@ -78,8 +78,11 @@ BarWidget {
     return icon() + " " + temps.join(" │ ") + pending
   }
 
+  // Changes made here are logged with source "widget" (`thermoslop log`).
+  readonly property string cli: "THERMOSLOP_SOURCE=widget thermoslop"
+
   function thermoslop(args) {
-    if (root.bar) root.bar.run("thermoslop " + args)
+    if (root.bar) root.bar.run(root.cli + " " + args)
   }
 
   // ---- panel hosting (same contract as Omarchy's weather widget)

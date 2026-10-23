@@ -14,7 +14,7 @@ anything exploitable. Expect an acknowledgement within a week.
 | File | Why it matters |
 |---|---|
 | `~/.local/share/thermoslop/pairing.json` | The controller's long-term HomeKit key. Anyone with this file and network access to the thermostat has **full control of it**. It's written mode 600 in a 700 directory. Back it up like an SSH key, and never commit or share it. |
-| `~/.local/state/thermoslop/changes.jsonl` | Audit log of MCP changes, including tailnet logins and device names (mode 600). |
+| `~/.local/state/thermoslop/changes.jsonl` | Change log of every thermostat change, including tailnet logins and device names of MCP callers (mode 600). |
 | `~/.config/thermoslop/config.toml` | Your subnets, houses and MCP allow-list (directory mode 700). |
 
 `~/.cache/thermoslop/state.json` holds only readings for the bar widget, and is

@@ -114,9 +114,9 @@ def test_audit_line(tmp_path):
 
 
 def test_audit_rotation(tmp_path, monkeypatch):
-    import thermoslop.guard
+    import thermoslop.audit
 
-    monkeypatch.setattr(thermoslop.guard, "ROTATE_BYTES", 100)
+    monkeypatch.setattr(thermoslop.audit, "ROTATE_BYTES", 100)
     path = tmp_path / "a.jsonl"
     guard = Guard(McpConfig(), path, Clock())
     for _ in range(3):
