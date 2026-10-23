@@ -100,3 +100,20 @@ def test_status_groups_by_house():
     text = format_states([home, cabin])
     assert text.startswith("Home\n  Main Floor:") and "\n\nCabin\n  Main Floor:" in text
     assert format_states([home]).startswith("Main Floor:")
+
+
+def test_history_samples_every_5_minutes_for_6_hours(tmp_path, monkeypatch):
+    import thermoslop.homekit as hk
+
+    monkeypatch.setattr(hk, "STATE_FILE", tmp_path / "state.json")
+    t0 = 1_000_000
+    for minute in range(0, 7 * 60, 1):  # a reading every minute for 7 hours
+        hk.write_cache([{"alias": "upstairs", "available": True, "temperature": 70 + minute / 60, "updated_at": t0 + minute * 60}])
+    series = hk.read_cache()["history"]["upstairs"]
+    assert all(b[0] - a[0] == 300 for a, b in zip(series, series[1:]))
+    assert series[-1][0] - series[0][0] < 6 * 3600 and len(series) == 72
+    assert "history" not in hk.read_cache()["thermostats"]["upstairs"]
+    hk.write_cache([{"alias": "upstairs", "available": False, "updated_at": t0 + 8 * 3600}])
+    assert len(hk.read_cache()["history"]["upstairs"]) == 72  # unavailable readings aren't recorded
+    hk.write_cache([], remove=["upstairs"])
+    assert "upstairs" not in hk.read_cache()["history"]

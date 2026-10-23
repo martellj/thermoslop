@@ -157,17 +157,26 @@ report them. Writes wait up to 8 s for the thermostat to report the change.
 
 ## Bar widget (`omarchy/martellj.thermoslop`)
 
-Shows an icon (flame while heating, snowflake while cooling, away icon when
-every thermostat is away) and each thermostat's temperature. Hover for details.
+The bar shows an icon (flame while heating, snowflake while cooling, away icon
+when every thermostat is away) and each thermostat's temperature.
 
-- **left click**: notification with full status
+- **left click**: the ThermoSlop panel, with one card per thermostat:
+  - temperature on a ring gauge, and humidity
+  - a SET box with − / + (presses are batched and sent together)
+  - a 6-hour trend line, and how far the room is from its target
+
+  The mode bar along the bottom (heat, cool, eco = away, hold = resume the
+  schedule) acts on every thermostat the panel shows. Colors come from your
+  Omarchy theme.
 - **right click**: away hold on all thermostats, or resume the schedule if any is away
 - **middle click**: resume the schedule
 - **scroll**: setpoint ±1° on the first thermostat, sent once scrolling stops
 
-It reads `~/.cache/thermoslop/state.json`, which `thermoslop watch` keeps current with
-HomeKit event subscriptions. It never polls the thermostats itself, and dims
-when the data is more than 10 minutes old.
+It reads `~/.cache/thermoslop/state.json`, which `thermoslop watch` keeps
+current with HomeKit event subscriptions. The watcher also records one
+temperature per thermostat every 5 minutes for the trend line, kept for 6
+hours. The widget never polls the thermostats itself, and dims when the data
+is more than 10 minutes old.
 
 To show or control just one thermostat, set `"thermostat": "upstairs"` on its
 entry in `~/.config/omarchy/shell.json`. `allowMultiple` is on, so you can

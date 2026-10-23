@@ -2,7 +2,7 @@
 // `thermoslop watch` keeps fresh (it subscribes to HomeKit events), so the widget
 // never polls the thermostats itself.
 //
-//   left click    notification with full status (all thermostats + sensors)
+//   left click    open the panel (cards per thermostat, setpoint +/-, modes)
 //   right click   away hold on every thermostat, or resume the schedule if away
 //   middle click  resume the schedule (clear holds)
 //   scroll        nudge the setpoint by 1°, sent once scrolling stops
@@ -28,6 +28,8 @@ BarWidget {
   readonly property int staleSeconds: 600
 
   property var thermostats: []
+  property var history: ({})
+  property real updatedAt: 0
   property real now: Date.now() / 1000
   property int pendingDelta: 0
 
@@ -36,12 +38,18 @@ BarWidget {
   readonly property var live: shown.filter(t => t.available && now - (t.updated_at || 0) < staleSeconds)
   readonly property string scrollTarget: only || (shown.length ? shown[0].alias : "")
   readonly property bool anyAway: live.some(t => t.comfort === "away")
+  // `--all`, `--all --house cabin` or `-t upstairs`: what the bar's actions act on.
+  readonly property string scope: only ? "-t " + Util.shellQuote(only)
+    : house ? "--all --house " + Util.shellQuote(house) : "--all"
 
   function load(text) {
     try {
-      const stats = JSON.parse(text || "{}").thermostats || {}
+      const cache = JSON.parse(text || "{}")
+      const stats = cache.thermostats || {}
       root.thermostats = Object.keys(stats).map(k => stats[k])
         .sort((a, b) => (a.house || "").localeCompare(b.house || "") || a.alias.localeCompare(b.alias))
+      root.history = cache.history || {}
+      root.updatedAt = cache.updated_at || 0
     } catch (e) {
       // Mid-write reads can't happen (the file is replaced atomically), so a
       // parse failure means a bad file: keep the last good reading.
@@ -67,34 +75,39 @@ BarWidget {
     return icon() + " " + temps.join(" │ ") + pending
   }
 
-  function setpoint(t) {
-    if (t.mode === "auto") return deg(t.heat_setpoint) + "–" + deg(t.cool_setpoint)
-    if (t.target !== null && t.target !== undefined) return deg(t.target)
-    return "—"
-  }
-
-  function tooltip() {
-    if (!shown.length) return "ThermoSlop: no data (is `thermoslop watch` running?)"
-    const grouped = houses.length > 1
-    return shown.map(function(t, i) {
-      const heading = grouped && (i === 0 || shown[i - 1].house !== t.house)
-        ? (i ? "\n" : "") + (t.house ? t.house[0].toUpperCase() + t.house.slice(1) : "Other") + "\n" : ""
-      return heading + describe(t)
-    }).join("\n")
-  }
-
-  function describe(t) {
-    if (!t.available) return t.name + ": unavailable"
-    let line = t.name + "  " + deg(t.temperature) + "  " + t.action + " → " + setpoint(t) + " " + t.mode
-    if (t.comfort) line += " · " + t.comfort
-    if (t.humidity !== null && t.humidity !== undefined) line += " · " + t.humidity + "%"
-    const occupied = (t.sensors || []).filter(s => s.occupied).map(s => s.name)
-    if (occupied.length) line += "\n  occupied: " + occupied.join(", ")
-    return line
-  }
-
   function thermoslop(args) {
     if (root.bar) root.bar.run("thermoslop " + args)
+  }
+
+  // ---- panel hosting (same contract as Omarchy's weather widget)
+
+  function injectPanel() {
+    const target = panelLoader.item
+    if (!target) return
+    target.bar = root.bar
+    target.settings = root.settings
+    target.anchorItem = button
+    target.hostWidget = root
+  }
+
+  readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
+  readonly property bool popoutSwitchClosing: panelLoader.item ? panelLoader.item.popoutSwitchClosing === true : false
+  function open() { if (panelLoader.item) panelLoader.item.openFromHotkey() }
+  function close() { if (panelLoader.item) panelLoader.item.close() }
+  function closeForPopoutSwitch() { if (panelLoader.item) panelLoader.item.closeForPopoutSwitch() }
+
+  onBarChanged: injectPanel()
+  onSettingsChanged: injectPanel()
+
+  Loader {
+    id: panelLoader
+    active: true
+    source: Qt.resolvedUrl("Panel.qml")
+    visible: false
+    onLoaded: {
+      root.injectPanel()
+      Qt.callLater(root.injectPanel)
+    }
   }
 
   FileView {
@@ -143,14 +156,13 @@ BarWidget {
     fontSize: Style.font.caption
     horizontalMargin: 6
     dimmed: root.live.length === 0
-    tooltipText: root.tooltip()
+    // The panel is the detail view.
+    tooltipText: ""
 
     onPressed: function(b) {
-      const all = root.only ? "-t " + Util.shellQuote(root.only)
-        : root.house ? "--all --house " + Util.shellQuote(root.house) : "--all"
-      if (b === Qt.RightButton) root.thermoslop((root.anyAway ? "resume " : "away ") + all)
-      else if (b === Qt.MiddleButton) root.thermoslop("resume " + all)
-      else if (root.bar) root.bar.run("omarchy-notification-send -g 󰔏 ThermoSlop \"$(thermoslop status 2>&1)\"")
+      if (b === Qt.RightButton) root.thermoslop((root.anyAway ? "resume " : "away ") + root.scope)
+      else if (b === Qt.MiddleButton) root.thermoslop("resume " + root.scope)
+      else if (panelLoader.item) panelLoader.item.toggle()
     }
 
     onWheelMoved: function(delta) {

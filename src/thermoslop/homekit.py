@@ -197,13 +197,32 @@ def read_cache() -> dict:
         return {"thermostats": {}}
 
 
+# Temperature history for the widget's trend line: one sample per 5 minutes,
+# kept for 6 hours. Stored beside the states, so `status --json` stays lean.
+HISTORY_STEP = 300
+HISTORY_SPAN = 6 * 3600
+
+
+def _record_history(cache: dict, state: dict) -> None:
+    if not state.get("available") or state.get("temperature") is None:
+        return
+    series = cache.setdefault("history", {}).setdefault(state["alias"], [])
+    now = state.get("updated_at") or time.time()
+    if series and now - series[-1][0] < HISTORY_STEP:
+        return
+    series.append([round(now), state["temperature"]])
+    series[:] = [point for point in series if point[0] > now - HISTORY_SPAN]
+
+
 def write_cache(states: list[dict], remove: list[str] = ()) -> None:
     cache = read_cache()
     thermostats = cache.setdefault("thermostats", {})
     for state in states:
         thermostats[state["alias"]] = state
+        _record_history(cache, state)
     for alias in remove:
         thermostats.pop(alias, None)
+        cache.get("history", {}).pop(alias, None)
     cache["updated_at"] = time.time()
     STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     tmp = STATE_FILE.with_suffix(f".{os.getpid()}.tmp")
