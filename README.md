@@ -183,8 +183,9 @@ entry in `~/.config/omarchy/shell.json`. `allowMultiple` is on, so you can
 add one widget per thermostat.
 
 The plugin directory is symlinked into `~/.config/omarchy/plugins/`, and the
-shell doesn't hot-reload through that symlink. After editing the QML, run
-`omarchy-shell shell rescanPlugins`.
+shell doesn't hot-reload through that symlink. A rescan keeps the compiled
+widget, so after editing the QML restart the shell with `omarchy restart shell`.
+`omarchy-shell shell summon martellj.thermoslop` then opens the panel.
 
 ## Configuration: `~/.config/thermoslop/config.toml`
 
