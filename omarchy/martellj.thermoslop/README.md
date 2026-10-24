@@ -75,12 +75,18 @@ HomeKit).
 - **Bar:** an icon (heating, cooling, away) and each thermostat's
   temperature, grouped by house.
 - **Left click:** the panel.
-  - Per-thermostat cards: ring gauge, humidity, setpoint − / +, trend line.
-  - A mode bar: heat, cool, eco (away), hold (resume the schedule).
+  - Per-thermostat cards: ring gauge, humidity, setpoint − / +, trend line,
+    and the card's own HEAT / COOL / OFF / AWAY / RESUME. Each acts on that
+    thermostat only.
+  - The setpoint is read from the thermostat before you can change it, and
+    the exact value you see is what gets sent.
+  - A house with several thermostats gets AWAY ALL / RESUME ALL, confirmed
+    by a second press.
   - **+ ADD THERMOSTAT** to pair.
-- **Right click:** away on all thermostats, or resume if any is away.
-- **Middle click:** resume the schedule.
-- **Scroll:** setpoint ±1°.
+- **Right click:** away, or resume if away, for the one thermostat or house
+  the widget shows. With several houses shown, it opens the panel.
+- **Middle click:** resume the schedule (same scope as right click).
+- **Scroll:** setpoint ±1°, only when the widget shows one thermostat.
 
 Settings, on the widget's entry in `~/.config/omarchy/shell.json`:
 

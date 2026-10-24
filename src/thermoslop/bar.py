@@ -126,18 +126,32 @@ def swiftbar(states: list[dict], now: float, binary: str, filtered: bool = False
     lines = [f"{title} | sfimage={SF_SYMBOLS[cond]}", "---"]
     if cond == "empty":
         lines.append(NO_MATCH if filtered else EMPTY)
+    # Every action names one thermostat or one house: nothing spans houses.
+    def house_actions(house: str | None, indent: str) -> list[str]:
+        live_here = [x for x in states if x.get("house") == house and x.get("available")]
+        if len(live_here) < 2:
+            return []
+        scope = ["--all", "--house", house] if house else ["--all"]
+        where = f" at {house.title()}" if house else ""
+        return [action(f"{indent}Away (all {len(live_here)}{where})", "away", *scope),
+                action(f"{indent}Resume schedule (all {len(live_here)}{where})", "resume", *scope)]
+
     houses = len({s.get("house") for s in states}) > 1
     current = None
     for s in states:
         if houses and s.get("house") != current:
             current = s.get("house")
             lines.append(f"{(current or 'other').title()} | size=11 color=gray")
+            lines += house_actions(current, "--") if current else []
         lines.append(describe(s))
-        if s.get("available") and s.get("mode") in ("heat", "cool", "auto"):
-            lines.append(action("--Raise 1°", "set", "+1", "-t", s["alias"]))
-            lines.append(action("--Lower 1°", "set", "-1", "-t", s["alias"]))
-    if states:
-        lines += ["---", action("Away (all)", "away", "--all"), action("Resume schedule (all)", "resume", "--all")]
+        if s.get("available"):
+            if s.get("mode") in ("heat", "cool", "auto"):
+                lines.append(action("--Raise 1°", "set", "+1", "-t", s["alias"]))
+                lines.append(action("--Lower 1°", "set", "-1", "-t", s["alias"]))
+            lines.append(action("--Away", "away", "-t", s["alias"]))
+            lines.append(action("--Resume schedule", "resume", "-t", s["alias"]))
+    if states and not houses and (extra := house_actions(states[0].get("house"), "")):
+        lines += ["---", *extra]
     if cond == "stale":
         lines.append(f"{stale_reason(watcher)} | color=red")
     lines += ["---", "Refresh | refresh=true"]

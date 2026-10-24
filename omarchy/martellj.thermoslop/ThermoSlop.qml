@@ -2,11 +2,14 @@
 // `thermoslop watch` keeps fresh (it subscribes to HomeKit events), so the widget
 // never polls the thermostats itself.
 //
-//   left click    open the panel (cards per thermostat, setpoint +/-, modes)
-//   right click   away hold on every thermostat, or resume the schedule if away
+//   left click    open the panel (cards per thermostat, setpoint −/+, modes)
+//   right click   away hold, or resume the schedule if away
 //   middle click  resume the schedule (clear holds)
-//   scroll        nudge the setpoint by 1°, sent once scrolling stops; locked
-//                 until the thermostat reports the new value
+//   scroll        nudge the setpoint by 1° (read from the thermostat first,
+//                 sent as one value once scrolling stops)
+// Right/middle click act on the one thermostat or the one house shown; with
+// several houses shown they open the panel instead. Scroll works only when one
+// thermostat is shown: it never guesses which one you meant.
 //
 // Optional settings on the widget's entry in shell.json:
 //   "thermostat": "upstairs"   show / control only this one
@@ -82,14 +85,15 @@ BarWidget {
   // The watcher rewrites the file at least every few minutes, even while it
   // can't reach a thermostat, so an old file means the watcher itself stopped.
   readonly property bool watcherLive: now - updatedAt < staleSeconds
-  readonly property string scrollTarget: only || (shown.length ? shown[0].alias : "")
+  readonly property string scrollTarget: shown.length === 1 ? shown[0].alias : ""
   readonly property bool anyAway: live.some(t => t.comfort === "away")
-  // Scroll goes through the panel's setpoint batching, which sends absolute
-  // values and locks until the thermostat confirms; this is its unsent part.
-  readonly property int pendingDelta: panel && scrollTarget ? (panel.pending[scrollTarget] || 0) : 0
-  // `--all`, `--all --house cabin` or `-t upstairs`: what the bar's actions act on.
-  readonly property string scope: only ? "-t " + Util.shellQuote(only)
-    : house ? "--all --house " + Util.shellQuote(house) : "--all"
+  // Scroll drives that thermostat's controller in the panel (the same one its
+  // card uses); this is its value on the way, e.g. "→67°".
+  readonly property string pendingText: panel && scrollTarget ? panel.pendingLabel(scrollTarget) : ""
+  // What right/middle clicks act on: `-t upstairs` for one thermostat,
+  // `--all --house cabin` for one house, or "" when several houses are shown.
+  readonly property string scope: shown.length === 1 ? "-t " + Util.shellQuote(shown[0].alias)
+    : houses.length === 1 ? "--all" + (houses[0] ? " --house " + Util.shellQuote(houses[0]) : "") : ""
 
   function load(text) {
     try {
@@ -122,7 +126,7 @@ BarWidget {
     if (!shown.length) return ""
     const temps = houses.map(h => shown.filter(t => (t.house || "") === h)
       .map(t => t.available ? deg(t.temperature) : "?").join(" "))
-    const pending = pendingDelta ? "  →" + (pendingDelta > 0 ? "+" : "") + pendingDelta : ""
+    const pending = pendingText ? "  " + pendingText : ""
     return icon() + " " + temps.join(" │ ") + pending + (cliState === "outdated" ? "  ↑" : "")
   }
 
@@ -205,14 +209,14 @@ BarWidget {
     tooltipText: ""
 
     onPressed: function(b) {
-      if (b === Qt.RightButton) root.thermoslop((root.anyAway ? "resume " : "away ") + root.scope)
-      else if (b === Qt.MiddleButton) root.thermoslop("resume " + root.scope)
+      const act = b === Qt.RightButton ? (root.anyAway ? "resume " : "away ") : b === Qt.MiddleButton ? "resume " : ""
+      if (act && root.scope) root.thermoslop(act + root.scope)
       else if (panelLoader.item) panelLoader.item.toggle()
     }
 
     onWheelMoved: function(delta) {
-      const t = root.shown.find(z => z.alias === root.scrollTarget)
-      if (t && panelLoader.item) panelLoader.item.nudge(t, delta > 0 ? 1 : -1)
+      if (!root.scrollTarget || !root.cliOk || !panelLoader.item) return
+      panelLoader.item.nudge(root.shown[0], delta > 0 ? 1 : -1)
     }
   }
 }

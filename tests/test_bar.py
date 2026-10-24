@@ -67,7 +67,21 @@ def test_swiftbar_actions_use_absolute_quoted_path():
     raise_upstairs = next(l for l in lines if "Raise" in l and "upstairs" in l)
     assert raise_upstairs.startswith("--Raise 1° | bash=\"/Users/a b/.local/bin/thermoslop\" param1=set param2=+1")
     assert "terminal=false refresh=true" in raise_upstairs
-    assert any(l.startswith("Away (all) |") for l in lines)
+    assert any(l.startswith("Away (all 2 at Home) |") and "param2=--all param3=--house param4=home" in l for l in lines)
+
+
+def test_swiftbar_actions_never_span_houses():
+    lines = render("swiftbar", select(CACHE), NOW, binary="/x/thermoslop").splitlines()
+    actions = [l for l in lines if "bash=" in l]
+    # --all only ever comes with --house
+    assert all("--house" in l for l in actions if "param2=--all" in l)
+    # each thermostat has its own away and resume
+    for alias in ("main-floor", "upstairs", "cabin-main-floor"):
+        mine = [l for l in actions if l.endswith(f"param3={alias} terminal=false refresh=true")]
+        assert any("param1=away" in l for l in mine) and any("param1=resume" in l for l in mine)
+    # home has two thermostats: its heading gets house actions; the cabin's one doesn't
+    assert any(l.startswith("--Away (all 2 at Home)") for l in lines)
+    assert not any("at Cabin" in l for l in lines)
 
 
 def test_swiftbar_groups_by_house():

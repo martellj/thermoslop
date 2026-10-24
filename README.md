@@ -259,12 +259,23 @@ when every thermostat is away) and each thermostat's temperature.
 
 - **left click**: the ThermoSlop panel, with one card per thermostat:
   - temperature on a ring gauge, and humidity
-  - a SET box with − / + (presses are batched and sent together)
+  - a SET box with − / +
+  - its own mode row: HEAT, COOL, OFF, AWAY (toggle), RESUME (clear the hold)
   - a trend line (24 hours by default), and how far the room is from its target
 
-  The mode bar along the bottom (heat, cool, eco = away, hold = resume the
-  schedule) acts on every thermostat the panel shows. Colors come from your
-  Omarchy theme.
+  Every control on a card acts on that thermostat only. The SET box never
+  starts from cached data: opening the panel reads each thermostat
+  (READING…), and − / + stay off until that read succeeds. Presses add up
+  while you click, and about 1.5 s after the last one the exact value is
+  sent (`thermoslop set 67`, never `+3`); the box shows SAVING… and then
+  what the thermostat reports back, with a note if it took a different
+  value. Presses made while saving go out next.
+
+  A house with several thermostats gets AWAY ALL and RESUME ALL next to its
+  name. They ask to confirm ("AWAY 2 AT HOME?") and run on a second press
+  within 4 seconds. There is no button that changes the mode of several
+  thermostats; for that, use `thermoslop mode heat --all --house home`.
+  Colors come from your Omarchy theme.
 - **+ ADD THERMOSTAT** (in the panel): pair a new thermostat without a terminal.
   1. It scans the network and lists HomeKit thermostats as ready, paired here or
      paired elsewhere.
@@ -274,9 +285,15 @@ when every thermostat is away) and each thermostat's temperature.
   4. It shows success, or the error with Try Again.
 
   It runs the same `thermoslop discover` / `thermoslop pair` as the terminal.
-- **right click**: away hold on all thermostats, or resume the schedule if any is away
+- **right click**: away hold, or resume the schedule if any is away
 - **middle click**: resume the schedule
-- **scroll**: setpoint ±1° on the first thermostat, sent once scrolling stops
+- **scroll**: setpoint ±1°, the same way as the card's − / + (read first,
+  one exact value once scrolling stops)
+
+Right and middle click act on the one thermostat or the one house the widget
+shows. With several houses shown they open the panel instead, and scrolling
+works only when the widget shows a single thermostat. Use the `thermostat` or
+`house` setting (below) to get them back for a house or a thermostat.
 
 It reads `~/.cache/thermoslop/state.json`, which `thermoslop watch` keeps
 current with HomeKit event subscriptions. The watcher also records one

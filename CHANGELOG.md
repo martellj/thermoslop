@@ -23,12 +23,13 @@ version.
   stopped. `thermoslop bar` makes the same distinction, and the zones pill
   says OFFLINE rather than IDLE.
 - A long status line in the panel header no longer runs under the zones pill.
-- Setpoint − / + in the panel (and scrolling on the bar) could overshoot.
-  They sent relative changes, which the thermostat applied to the value it
-  still reported from before the last change, and the panel stopped showing
-  a pending change after 4 seconds even if it hadn't landed. The panel now
-  sends the exact temperature it shows, and locks that thermostat's buttons
-  ("SYNCING…") until the watcher reports the new value.
+- Setpoint − / + in the panel (and scrolling on the bar) could start from a
+  stale cached value and overshoot. They sent relative changes, which the
+  thermostat applied to the value it still reported from before the last
+  change. Each card now reads its thermostat before you can change it, sends
+  the exact value it shows, and takes the result from that command's own
+  reply (with a note if the thermostat took a different value). Presses made
+  while a change is saving are sent next, never dropped.
 - Changes to one thermostat from several ThermoSlop processes (panel, CLI,
   SwiftBar, MCP) now run one at a time, each starting from a confirmed value.
 - `thermoslop setup` on distributions without a systemd user session
@@ -37,6 +38,21 @@ version.
   manager or autostart.
 - Under `python -m thermoslop`, `setup` now points services at the installed
   `thermoslop` command.
+
+### Changed
+
+- **BREAKING (panel):** the mode bar that changed every thermostat at once
+  is gone. Each card has its own HEAT, COOL, OFF, AWAY and RESUME, acting on
+  that thermostat only. A house with several thermostats gets AWAY ALL and
+  RESUME ALL, which ask to confirm with a second press. To switch a whole
+  house's mode, use `thermoslop mode heat --all --house home`.
+- The bar widget's right and middle click act on the one thermostat or the
+  one house it shows; with several houses shown they open the panel instead
+  of changing every thermostat. Scrolling works only when the widget shows a
+  single thermostat (it used to pick the first one, which with two houses
+  was a cabin thermostat).
+- SwiftBar: away and resume are per thermostat, plus per house for a house
+  with several thermostats; the "(all)" items that spanned houses are gone.
 
 ### Added
 

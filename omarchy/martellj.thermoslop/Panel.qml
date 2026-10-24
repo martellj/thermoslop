@@ -1,7 +1,9 @@
-// The ThermoSlop panel: a header, one card per thermostat (ring gauge,
-// temperature, setpoint +/-, temperature trend) and a mode bar. Data comes from the
-// bar widget (hostWidget), which reads the watcher's cache file. Changes run the
-// `thermoslop` CLI, so they go through the same code as the terminal.
+// The ThermoSlop panel: a header and one card per thermostat (ring gauge,
+// temperature, setpoint −/+, its own mode row, temperature trend). Data comes
+// from the bar widget (hostWidget), which reads the watcher's cache file.
+// Changes run the `thermoslop` CLI, so they go through the same code as the
+// terminal, and every control acts on one thermostat; only away/resume can
+// act on a whole house, after a confirming second press.
 //
 // Colors come from the Omarchy theme (accent for heat, the foreground at
 // varying alpha for surfaces), so the panel follows theme changes.
@@ -32,14 +34,39 @@ Panel {
   readonly property real now: hostWidget ? hostWidget.now : Date.now() / 1000
   readonly property bool multiHouse: hostWidget ? hostWidget.houses.length > 1 : false
 
-  // Setpoint +/- presses, per alias, sent together once clicking stops.
-  property var pending: ({})
-  // Setpoints sent but not yet reported back by the watcher, per alias:
-  // {target} or {heat, cool}, plus `until`. That thermostat's buttons stay
-  // locked meanwhile, so presses never stack on a value the thermostat hasn't
-  // confirmed (an ecobee reports the old value for a few seconds).
-  property var inflight: ({})
-  readonly property int confirmMs: 20000
+  // One SetpointControl per thermostat (see the component below), by alias.
+  // Keyed on the alias list as a string, so a cache reload with the same
+  // thermostats keeps them (and any change in progress).
+  property var controls: ({})
+  readonly property string aliasKey: zones.map(z => z.alias).join("\n")
+  function control(alias) { return root.controls[alias] || null }
+
+  Instantiator {
+    model: root.aliasKey ? root.aliasKey.split("\n") : []
+    delegate: SetpointControl {
+      required property string modelData
+      alias: modelData
+      t: root.zones.find(z => z.alias === modelData) || null
+    }
+    onObjectAdded: function(index, object) {
+      const next = Object.assign({}, root.controls)
+      next[object.alias] = object
+      root.controls = next
+    }
+    onObjectRemoved: function(index, object) {
+      const next = Object.assign({}, root.controls)
+      delete next[object.alias]
+      root.controls = next
+    }
+  }
+
+  // Away/resume for a whole house waits for a second press within 4 s.
+  property string armed: ""
+  Timer {
+    id: disarm
+    interval: 4000
+    onTriggered: root.armed = ""
+  }
 
   readonly property color fg: Color.popups.text
   readonly property color accent: Color.accent
@@ -55,6 +82,8 @@ Panel {
   function open() {
     root.controller.show()
     if (root.hostWidget) root.hostWidget.now = Date.now() / 1000
+    // Never adjust from the cache: read every thermostat now.
+    for (const alias in root.controls) root.controls[alias].read()
   }
   function openFromHotkey() { open() }
   function close() { root.controller.hide() }
@@ -77,46 +106,13 @@ Panel {
     return root.dim
   }
 
-  // What the box shows: the value on its way, else the reported one plus
-  // presses not sent yet.
-  function wanted(t) {
-    const f = root.inflight[t.alias]
-    if (f) return f
-    const d = root.pending[t.alias] || 0
-    if (t.mode === "auto") return { heat: t.heat_setpoint + d, cool: t.cool_setpoint + d }
-    return { target: t.target === null || t.target === undefined ? null : t.target + d }
+  function fmtSetpoint(v, units) {
+    if (!v || v.mode === "off") return "OFF"
+    // Half degrees stay visible (an ecobee in °C, or one that adjusted a value).
+    const n = x => x === null || x === undefined ? "—" : String(Math.round(x * 10) / 10)
+    if (v.mode === "auto") return n(v.heat) + "–" + n(v.cool) + "°"
+    return n(v.target) + "°" + (units || "")
   }
-
-  function setpointText(t) {
-    if (t.mode === "off" || (t.mode !== "auto" && (t.target === null || t.target === undefined))) return "OFF"
-    const w = root.wanted(t)
-    if (t.mode === "auto") return num(w.heat) + "–" + num(w.cool) + "°"
-    return num(w.target) + "°" + t.units
-  }
-
-  // Adjust only from a fresh reading, and not while a change is unconfirmed.
-  function adjustable(t) {
-    return root.cliOk && t.available && t.mode !== "off" && !root.inflight[t.alias]
-      && root.live.some(l => l.alias === t.alias)
-  }
-
-  // Drop in-flight values the watcher has reported back, or that timed out
-  // (the box then shows whatever the thermostat really has).
-  function reconcile() {
-    const next = {}
-    let changed = false
-    for (const alias of Object.keys(root.inflight)) {
-      const f = root.inflight[alias]
-      const t = root.zones.find(z => z.alias === alias)
-      const close = (a, b) => a !== null && a !== undefined && Math.abs(a - b) < 0.3
-      const done = !t || Date.now() > f.until || (f.target !== undefined
-        ? close(t.target, f.target) : close(t.heat_setpoint, f.heat) && close(t.cool_setpoint, f.cool))
-      if (done) changed = true
-      else next[alias] = f
-    }
-    if (changed) root.inflight = next
-  }
-  onZonesChanged: reconcile()
 
   // Positive when the room is warmer than the target (heat) or cooler (cool):
   // the thermostat has nothing to do.
@@ -141,59 +137,44 @@ Panel {
     return "IDLE"
   }
 
+  // The bar's scroll and the card's −/+ both land here.
   function nudge(t, step) {
-    if (!root.adjustable(t)) return
-    const alias = t.alias
-    const next = Object.assign({}, root.pending)
-    next[alias] = (next[alias] || 0) + step
-    if (next[alias] === 0) delete next[alias]
-    root.pending = next
-    sendPending.restart()
+    const c = root.control(t.alias)
+    if (c && root.cliOk) c.press(step)
+  }
+
+  // Shown in the bar while a scroll's change is pending or saving.
+  function pendingLabel(alias) {
+    const c = root.control(alias)
+    return c && c.draft ? "→" + root.fmtSetpoint(c.draft, "") : ""
   }
 
   function run(args) {
     if (root.bar && root.cliOk) root.bar.run(args)
   }
 
-  // Run one `thermoslop` command per thermostat shown, one after another.
-  function forEachZone(argsFor) {
-    const commands = root.zones.filter(t => t.available).map(t => root.cli + " " + argsFor(t) + " -t " + Util.shellQuote(t.alias))
-    if (commands.length) run(commands.join("; "))
+  function houseZones(house) {
+    return root.zones.filter(t => (t.house || "") === (house || "") && t.available)
   }
 
-  function allIn(mode) {
-    return root.live.length > 0 && root.live.every(t => t.mode === mode)
-  }
-
-  Timer {
-    id: sendPending
-    interval: 900
-    // Absolute values, so the thermostat ends up at exactly what the box showed
-    // even if it hasn't caught up with an earlier change.
-    onTriggered: {
-      const commands = []
-      const sent = Object.assign({}, root.inflight)
-      const fmt = v => String(Math.round(v * 10) / 10)
-      for (const alias of Object.keys(root.pending)) {
-        const t = root.zones.find(z => z.alias === alias)
-        if (!t || !t.available) continue
-        const w = root.wanted(t)
-        const args = t.mode === "auto" ? "set --heat " + fmt(w.heat) + " --cool " + fmt(w.cool) : "set " + fmt(w.target)
-        commands.push(root.cli + " " + args + " -t " + Util.shellQuote(alias))
-        sent[alias] = Object.assign({ until: Date.now() + root.confirmMs }, w)
-      }
-      root.inflight = sent
-      root.pending = ({})
-      if (commands.length) root.run(commands.join("; "))
+  // First press arms (the button asks to confirm), the second runs.
+  function houseAction(action, house) {
+    const key = action + ":" + (house || "")
+    if (root.armed !== key) {
+      root.armed = key
+      disarm.restart()
+      return
     }
+    root.armed = ""
+    disarm.stop()
+    run(root.cli + " " + action + " --all" + (house ? " --house " + Util.shellQuote(house) : ""))
   }
 
-  // Also expires in-flight values when no update arrives at all.
-  Timer {
-    interval: 1000
-    repeat: true
-    running: Object.keys(root.inflight).length > 0
-    onTriggered: root.reconcile()
+  function houseLabel(action, house) {
+    const n = root.houseZones(house).length
+    if (root.armed === action + ":" + (house || ""))
+      return action.toUpperCase() + " " + n + (house ? " AT " + house.toUpperCase() : "") + "?"
+    return action === "away" ? "AWAY ALL" : "RESUME ALL"
   }
 
   // ---- adding a thermostat. Runs `thermoslop discover --json` and
@@ -495,18 +476,31 @@ Panel {
               required property var modelData
               required property int index
               readonly property var t: modelData
+              readonly property var c: root.control(t.alias)
               readonly property bool showHouse: root.multiHouse && (index === 0 || root.zones[index - 1].house !== t.house)
               width: content.width
               spacing: Style.space(6)
 
-              Text {
+              Item {
                 visible: zone.showHouse
-                text: (zone.t.house || "other").toUpperCase()
-                color: root.dim
-                font.family: root.font
-                font.pixelSize: Style.font.caption
-                font.letterSpacing: 2
-                leftPadding: Style.space(4)
+                width: parent.width
+                height: Math.max(houseName.implicitHeight, houseActions.implicitHeight)
+                Text {
+                  id: houseName
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: (zone.t.house || "other").toUpperCase()
+                  color: root.dim
+                  font.family: root.font
+                  font.pixelSize: Style.font.caption
+                  font.letterSpacing: 2
+                  leftPadding: Style.space(4)
+                }
+                HouseActions {
+                  id: houseActions
+                  anchors.right: parent.right
+                  anchors.verticalCenter: parent.verticalCenter
+                  house: zone.t.house || ""
+                }
               }
 
               Card {
@@ -633,15 +627,18 @@ Panel {
 
                         Text {
                           anchors.right: parent.right
-                          text: root.inflight[zone.t.alias] ? "SYNCING…" : "SET (" + (zone.t.mode || "—").toUpperCase() + ")"
-                          color: root.dim
+                          text: !zone.c ? "SET" : zone.c.phase === "reading" ? "READING…"
+                            : zone.c.phase === "sending" ? "SAVING…"
+                            : zone.c.phase === "unknown" ? "CAN'T READ"
+                            : "SET (" + ((zone.c.base || zone.t).mode || "—").toUpperCase() + ")"
+                          color: zone.c && zone.c.phase === "unknown" ? root.bad : root.dim
                           font.family: root.font
                           font.pixelSize: Style.font.caption
                           font.letterSpacing: 1.5
                         }
                         Row {
                           spacing: Style.space(10)
-                          readonly property bool adjustable: root.adjustable(zone.t)
+                          readonly property bool adjustable: root.cliOk && !!zone.c && zone.c.adjustable
                           StepButton {
                             text: "−"
                             enabled: parent.adjustable
@@ -649,8 +646,9 @@ Panel {
                           }
                           Text {
                             anchors.verticalCenter: parent.verticalCenter
-                            text: root.setpointText(zone.t)
-                            color: root.pending[zone.t.alias] || root.inflight[zone.t.alias] ? root.accent : root.fg
+                            text: zone.c ? root.fmtSetpoint(zone.c.shown, (zone.c.base || zone.t).units) : "—"
+                            // Dim until a fresh read backs the number up.
+                            color: zone.c && zone.c.draft ? root.accent : zone.c && zone.c.base ? root.fg : root.dim
                             font.family: root.font
                             font.pixelSize: Style.font.heading
                             font.bold: true
@@ -661,7 +659,53 @@ Panel {
                             onClicked: root.nudge(zone.t, 1)
                           }
                         }
+                        Text {
+                          visible: !!zone.c && zone.c.note !== ""
+                          anchors.right: parent.right
+                          width: Math.min(implicitWidth, Style.space(150))
+                          elide: Text.ElideRight
+                          text: zone.c ? zone.c.note : ""
+                          color: zone.c && zone.c.phase === "unknown" ? root.bad : root.dim
+                          font.family: root.font
+                          font.pixelSize: Style.font.caption
+                        }
                       }
+                    }
+                  }
+
+                  // this thermostat's mode, comfort and hold
+                  Row {
+                    width: parent.width
+                    spacing: Style.space(6)
+                    readonly property var s: zone.c && zone.c.base ? zone.c.base : zone.t
+                    readonly property bool usable: root.cliOk && zone.t.available && !!zone.c && !zone.c.busy
+                    readonly property real cell: (width - spacing * 4) / 5
+                    Chip {
+                      width: parent.cell; label: "HEAT"; glyph: "󰈸"
+                      active: parent.s.mode === "heat"; enabled: parent.usable
+                      onClicked: zone.c.act(["mode", "heat"])
+                    }
+                    Chip {
+                      width: parent.cell; label: "COOL"; glyph: "󰜗"; activeTint: root.cool
+                      active: parent.s.mode === "cool"; enabled: parent.usable
+                      onClicked: zone.c.act(["mode", "cool"])
+                    }
+                    Chip {
+                      width: parent.cell; label: "OFF"; glyph: "󰤆"; activeTint: root.fg
+                      active: parent.s.mode === "off"; enabled: parent.usable
+                      onClicked: zone.c.act(["mode", "off"])
+                    }
+                    Chip {
+                      // ecobee's energy-saving comfort setting; pressed again, back to the schedule.
+                      width: parent.cell; label: "AWAY"; glyph: "󰌪"
+                      active: parent.s.comfort === "away"; enabled: parent.usable
+                      onClicked: zone.c.act([parent.s.comfort === "away" ? "resume" : "away"])
+                    }
+                    Chip {
+                      // Clears a hold (manual setpoint or comfort) and resumes the schedule.
+                      width: parent.cell; label: "RESUME"; glyph: "󰥔"
+                      enabled: parent.usable && (parent.s.comfort === "hold" || parent.s.comfort === "away")
+                      onClicked: zone.c.act(["resume"])
                     }
                   }
 
@@ -717,46 +761,15 @@ Panel {
             }
           }
 
-          // ---- mode bar
-          Card {
-            visible: root.view === "zones"
+          // ---- with one house of several thermostats, its away/resume sit here
+          Item {
+            visible: root.view === "zones" && !root.multiHouse && root.houseZones(root.zones.length ? root.zones[0].house : "").length > 1
             width: parent.width
-            height: Style.space(62)
-
-            Row {
-              anchors.fill: parent
-              anchors.margins: Style.space(6)
-              spacing: Style.space(6)
-              readonly property real cell: (width - spacing * 3) / 4
-
-              ModeButton {
-                width: parent.cell; height: parent.height
-                glyph: "󰈸"; label: "HEAT"
-                active: root.allIn("heat")
-                onClicked: root.forEachZone(t => "mode heat")
-              }
-              ModeButton {
-                width: parent.cell; height: parent.height
-                glyph: "󰜗"; label: "COOL"
-                active: root.allIn("cool")
-                activeTint: root.cool
-                onClicked: root.forEachZone(t => "mode cool")
-              }
-              ModeButton {
-                width: parent.cell; height: parent.height
-                glyph: "󰌪"; label: "ECO"
-                active: root.live.length > 0 && root.live.every(t => t.comfort === "away")
-                // Away is ecobee's energy-saving comfort setting; pressed again, back to the schedule.
-                onClicked: root.forEachZone(t => t.comfort === "away" ? "resume" : "away")
-              }
-              ModeButton {
-                width: parent.cell; height: parent.height
-                glyph: "󰥔"; label: "HOLD"
-                active: root.live.some(t => t.comfort === "hold")
-                highlightOnly: true
-                // Lit while any thermostat holds a manual setpoint; pressing resumes the schedule.
-                onClicked: root.forEachZone(t => "resume")
-              }
+            height: singleHouseActions.implicitHeight
+            HouseActions {
+              id: singleHouseActions
+              anchors.horizontalCenter: parent.horizontalCenter
+              house: root.zones.length ? (root.zones[0].house || "") : ""
             }
           }
 
@@ -1145,45 +1158,68 @@ Panel {
     }
   }
 
-  component ModeButton: Rectangle {
-    id: mode
+  // One of a card's mode buttons: lit when it's the thermostat's current state.
+  component Chip: Rectangle {
+    id: chip
     property string glyph: ""
     property string label: ""
     property bool active: false
-    property bool highlightOnly: false
+    property bool enabled: true
     property color activeTint: root.accent
     signal clicked()
-    radius: Style.space(8)
-    color: active && !highlightOnly ? Util.alpha(activeTint, 0.14) : (modeMouse.containsMouse ? Util.alpha(root.fg, 0.06) : "transparent")
-    border.color: active && !highlightOnly ? Util.alpha(activeTint, 0.6) : "transparent"
+    height: Style.space(28)
+    radius: Style.space(6)
+    color: active ? Util.alpha(activeTint, 0.14) : (chipMouse.containsMouse && enabled ? Util.alpha(root.fg, 0.06) : "transparent")
+    border.color: active ? Util.alpha(activeTint, 0.6) : root.hairline
     border.width: 1
+    opacity: enabled || active ? 1 : 0.4
 
-    Column {
+    Row {
       anchors.centerIn: parent
-      spacing: Style.space(3)
+      spacing: Style.space(4)
       Text {
-        anchors.horizontalCenter: parent.horizontalCenter
-        text: mode.glyph
-        color: mode.active ? mode.activeTint : root.dim
+        anchors.verticalCenter: parent.verticalCenter
+        text: chip.glyph
+        color: chip.active ? chip.activeTint : root.dim
         font.family: root.font
-        font.pixelSize: Style.font.iconLarge
+        font.pixelSize: Style.font.body
       }
       Text {
-        anchors.horizontalCenter: parent.horizontalCenter
-        text: mode.label
-        color: mode.active ? mode.activeTint : root.dim
+        anchors.verticalCenter: parent.verticalCenter
+        text: chip.label
+        color: chip.active ? chip.activeTint : root.dim
         font.family: root.font
         font.pixelSize: Style.font.caption
-        font.bold: mode.active
+        font.bold: chip.active
         font.letterSpacing: 1
       }
     }
     MouseArea {
-      id: modeMouse
+      id: chipMouse
       anchors.fill: parent
       hoverEnabled: true
-      cursorShape: Qt.PointingHandCursor
-      onClicked: mode.clicked()
+      cursorShape: chip.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+      onClicked: if (chip.enabled) chip.clicked()
+    }
+  }
+
+  // Away / resume for every thermostat in one house, each confirmed by a
+  // second press. Only shown for a house with more than one thermostat.
+  component HouseActions: Row {
+    property string house: ""
+    visible: root.houseZones(house).length > 1
+    spacing: Style.space(6)
+    TextButton {
+      text: root.houseLabel("away", parent.house)
+      primary: root.armed === "away:" + parent.house
+      enabled: root.cliOk
+      onClicked: root.houseAction("away", parent.house)
+    }
+    TextButton {
+      text: root.houseLabel("resume", parent.house)
+      primary: root.armed === "resume:" + parent.house
+      enabled: root.cliOk
+      onClicked: root.houseAction("resume", parent.house)
     }
   }
 

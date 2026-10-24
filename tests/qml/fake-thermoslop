@@ -1,0 +1,18 @@
+#!/bin/bash
+# A pretend `thermoslop` for tests/test_setpoint_qml.py: one heat-mode
+# thermostat whose setpoint lives in $FAKE_DIR/target. Reads take 0.6 s and
+# writes 2 s, like a real ecobee; asked for 67 it takes 66.5 instead.
+echo "$*" >> "$FAKE_DIR/calls.log"
+args=("$@")
+alias=cabin
+for i in "${!args[@]}"; do [ "${args[$i]}" = "-t" ] && alias=${args[$((i+1))]}; done
+target=$(cat "$FAKE_DIR/target" 2>/dev/null || echo 64)
+state() {
+  printf '{"alias":"%s","name":"Cabin","house":"cabin","available":true,"units":"F","temperature":60,"mode":"heat","action":"heating","target":%s,"heat_setpoint":56,"cool_setpoint":75,"comfort":"hold","updated_at":%s%s}' \
+    "$alias" "$1" "$(date +%s.%N)" "$2"
+}
+case "${args[0]}" in
+  status) sleep 0.6; echo "[$(state "$target")]" ;;
+  set) sleep 2; v=${args[1]}; [ "$v" = 67 ] && v=66.5; echo "$v" > "$FAKE_DIR/target"; state "$v" ',"confirmed":true' ;;
+  *) echo '{"error":"unexpected command"}' ;;
+esac

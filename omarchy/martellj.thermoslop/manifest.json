@@ -13,7 +13,7 @@
   },
   "barWidget": {
     "displayName": "ThermoSlop",
-    "description": "Thermostat temperatures; scroll adjusts the setpoint, right click toggles away",
+    "description": "Thermostat temperatures, with a panel to set each thermostat's temperature and mode",
     "category": "Info",
     "allowMultiple": true
   }
