@@ -303,6 +303,11 @@ reading, not an average, and gaps while a thermostat is unreachable are drawn
 straight across. The widget never polls the thermostats itself, and dims when the data
 is more than 10 minutes old.
 
+To try the panel without touching a thermostat, set `"demo": true` on the
+widget's entry in `~/.config/omarchy/shell.json`: three pretend thermostats in
+two houses, whose controls respond but read and send nothing (the preview
+image is taken this way).
+
 To try the pairing flow without touching your pairings, set
 `"pairingDemo": true` on the widget's entry in `~/.config/omarchy/shell.json`.
 "Add thermostat" then uses `--demo`: a pretend "Basement" thermostat that shows

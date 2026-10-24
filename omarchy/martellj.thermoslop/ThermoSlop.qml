@@ -14,6 +14,9 @@
 // Optional settings on the widget's entry in shell.json:
 //   "thermostat": "upstairs"   show / control only this one
 //   "house": "cabin"           show / control only this house's thermostats
+//   "demo": true               pretend thermostats in the bar and panel, for
+//                              trying the controls or taking screenshots;
+//                              nothing is read from or sent to a thermostat
 //   "pairingDemo": true        "Add thermostat" pairs with a pretend thermostat
 //                              (thermoslop discover/pair --demo); nothing is saved
 // With several houses shown, temperatures are grouped per house: 68° 70° │ 55°
@@ -95,7 +98,30 @@ BarWidget {
   readonly property string scope: shown.length === 1 ? "-t " + Util.shellQuote(shown[0].alias)
     : houses.length === 1 ? "--all" + (houses[0] ? " --house " + Util.shellQuote(houses[0]) : "") : ""
 
+  readonly property bool demo: !!(root.settings && root.settings.demo)
+
+  // Three pretend thermostats in two houses, with a day of trend.
+  function demoCache() {
+    const now = Date.now() / 1000
+    const t = (alias, name, house, temp, hum, action, target) => ({
+      alias: alias, name: name, house: house, available: true, units: "F", temperature: temp,
+      humidity: hum, mode: "heat", action: action, target: target, heat_setpoint: target,
+      cool_setpoint: 76, comfort: "hold", updated_at: now })
+    const trend = (base, swing, phase) => Array.from({ length: 96 }, (_, i) =>
+      [now - (95 - i) * 900, Math.round((base + swing * Math.sin(i / 15 + phase) + 0.15 * Math.sin(i * 0.9 + phase * 3) * Math.sin(i * 0.23)) * 10) / 10])
+    return {
+      updated_at: now, trend_hours: 24,
+      thermostats: {
+        "main-floor": t("main-floor", "Main Floor", "home", 68.4, 41, "heating", 70),
+        "upstairs": t("upstairs", "Upstairs", "home", 70.2, 38, "idle", 69),
+        "cabin": t("cabin", "Cabin", "cabin", 55.1, 52, "idle", 55),
+      },
+      history: { "main-floor": trend(68.5, 1.2, 0), "upstairs": trend(70, 0.8, 1), "cabin": trend(55, 2.5, 2) },
+    }
+  }
+
   function load(text) {
+    if (root.demo) text = JSON.stringify(root.demoCache())
     try {
       const cache = JSON.parse(text || "{}")
       const stats = cache.thermostats || {}
@@ -134,7 +160,7 @@ BarWidget {
   readonly property string cli: "THERMOSLOP_SOURCE=widget thermoslop"
 
   function thermoslop(args) {
-    if (root.bar && root.cliOk) root.bar.run(root.cli + " " + args)
+    if (root.bar && root.cliOk && !root.demo) root.bar.run(root.cli + " " + args)
   }
 
   // ---- panel hosting (same contract as Omarchy's weather widget)
@@ -176,7 +202,7 @@ BarWidget {
     printErrors: false
     onFileChanged: reload()
     onLoaded: root.load(text())
-    onLoadFailed: root.thermostats = []
+    onLoadFailed: root.demo ? root.load("") : root.thermostats = []
   }
 
   // Ages readings so the widget dims when the daemon stops. The reload covers

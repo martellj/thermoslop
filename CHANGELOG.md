@@ -56,6 +56,9 @@ version.
 
 ### Added
 
+- A `"demo": true` widget setting: pretend thermostats in the bar and panel,
+  whose controls respond without reading or sending anything. The plugin
+  preview image is taken with it.
 - `thermoslop bar` for other status bars: `text` (i3blocks, polybar),
   `waybar` (JSON with heating/cooling/away/stale classes) and `swiftbar`
   (macOS menu bar with actions). `--follow` updates on every state change.

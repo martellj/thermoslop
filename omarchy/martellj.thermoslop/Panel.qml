@@ -47,6 +47,7 @@ Panel {
       required property string modelData
       alias: modelData
       t: root.zones.find(z => z.alias === modelData) || null
+      demo: root.hostWidget ? root.hostWidget.demo : false
     }
     onObjectAdded: function(index, object) {
       const next = Object.assign({}, root.controls)
@@ -167,6 +168,7 @@ Panel {
     }
     root.armed = ""
     disarm.stop()
+    if (root.hostWidget && root.hostWidget.demo) return
     run(root.cli + " " + action + " --all" + (house ? " --house " + Util.shellQuote(house) : ""))
   }
 
@@ -372,6 +374,7 @@ Panel {
                 Row {
                   spacing: Style.space(8)
                   Text {
+                    id: titleText
                     text: "ThermoSlop"
                     color: root.fg
                     font.family: root.font
@@ -379,10 +382,13 @@ Panel {
                     font.bold: true
                   }
                   Badge {
+                    id: localBadge
                     anchors.verticalCenter: parent.verticalCenter
                     text: "LOCAL"
                     tint: root.accent
                     filled: true
+                    // Dropped when the zones pill needs the room.
+                    visible: headerCard.width - zonesPill.width - Style.space(100) - titleText.implicitWidth >= implicitWidth
                   }
                 }
 
@@ -401,7 +407,7 @@ Panel {
                     width: Math.min(implicitWidth, headerCard.width - zonesPill.width - Style.space(110))
                     elide: Text.ElideRight
                     text: parent.fresh
-                      ? root.live.length + (root.live.length === 1 ? " zone" : " zones") + " live · "
+                      ? root.live.length + " live · "
                         + root.ago(root.now - (root.hostWidget ? root.hostWidget.updatedAt : 0))
                       : root.watcherLive && root.zones.length ? "can't reach " + (root.zones.length === 1 ? "thermostat" : "thermostats") + " · retrying"
                       : root.watcherLive ? "watcher running · no thermostats"

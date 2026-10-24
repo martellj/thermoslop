@@ -23,6 +23,9 @@ Item {
   property real baseAt: 0            // when `base` was read (s)
   property bool acting: false        // a mode/away/resume command is running
   property int idleMs: 1500          // quiet time after the last press before sending
+  // The widget's "demo" setting: replies are made up from `t` after a short
+  // pause, and nothing runs.
+  property bool demo: false
   readonly property bool busy: acting || phase === "sending" || phase === "reading"
   readonly property var shown: draft || base || (t ? fromState(t) : null)
   readonly property bool adjustable: !!base && !acting && ["heat", "cool", "auto"].includes(base.mode)
@@ -55,6 +58,7 @@ Item {
   function read() {
     if (reader.running || phase === "editing" || phase === "sending" || acting) return
     phase = "reading"
+    if (demo) return fake(() => readDone(JSON.stringify(t)))
     reader.command = ["thermoslop", "status", "--live", "--json", "-t", sc.alias]
     reader.running = true
   }
@@ -78,6 +82,11 @@ Item {
     sent = draft
     phase = "sending"
     const fmt = v => String(Math.round(v * 10) / 10)
+    if (demo) {
+      const r = Object.assign({}, t, { target: sent.target, heat_setpoint: sent.heat ?? t.heat_setpoint,
+                                       cool_setpoint: sent.cool ?? t.cool_setpoint, confirmed: true })
+      return fake(() => writeDone(JSON.stringify(r)))
+    }
     const args = sent.mode === "auto" ? ["--heat", fmt(sent.heat), "--cool", fmt(sent.cool)] : [fmt(sent.target)]
     writer.command = ["env", "THERMOSLOP_SOURCE=widget", "thermoslop", "set"].concat(args, ["-t", sc.alias, "--json"])
     writer.running = true
@@ -90,8 +99,27 @@ Item {
     draft = null
     idle.stop()
     note = ""
+    if (demo) {
+      const s = Object.assign({}, t, { mode: base ? base.mode : t.mode, target: base ? base.target : t.target })
+      if (args[0] === "mode") s.mode = args[1]
+      else s.comfort = args[0] === "away" ? "away" : null
+      if (s.mode === "off") s.target = null
+      else if (s.target === null) s.target = t.heat_setpoint
+      return fake(() => actDone(JSON.stringify(s)))
+    }
     actor.command = ["env", "THERMOSLOP_SOURCE=widget", "thermoslop"].concat(args, ["-t", sc.alias, "--json"])
     actor.running = true
+  }
+
+  function fake(reply) {
+    demoReply = reply
+    demoTimer.restart()
+  }
+  property var demoReply: null
+  Timer {
+    id: demoTimer
+    interval: 700
+    onTriggered: if (sc.demoReply) sc.demoReply()
   }
 
   function parse(text) {
@@ -113,69 +141,69 @@ Item {
 
   Process {
     id: reader
-    stdout: StdioCollector {
-      onStreamFinished: {
-        const s = sc.parse(text)
-        if (!s || s.error || !s.available) {
-          sc.phase = "unknown"
-          sc.note = s && (s.error || "can't reach the thermostat") || "couldn't read the thermostat"
-          sc.queued = 0
-          return
-        }
-        sc.adopt(s)
-        sc.note = ""
-        sc.phase = "synced"
-        const q = sc.queued
-        sc.queued = 0
-        if (q) sc.press(q)
-      }
+    stdout: StdioCollector { onStreamFinished: sc.readDone(text) }
+  }
+
+  function readDone(text) {
+    const s = sc.parse(text)
+    if (!s || s.error || !s.available) {
+      sc.phase = "unknown"
+      sc.note = s && (s.error || "can't reach the thermostat") || "couldn't read the thermostat"
+      sc.queued = 0
+      return
     }
+    sc.adopt(s)
+    sc.note = ""
+    sc.phase = "synced"
+    const q = sc.queued
+    sc.queued = 0
+    if (q) sc.press(q)
   }
 
   Process {
     id: writer
-    stdout: StdioCollector {
-      onStreamFinished: {
-        const r = sc.parse(text)
-        const sent = sc.sent
-        sc.sent = null
-        if (!r || r.error || !r.alias) {
-          sc.note = r && r.error || "the change failed"
-          sc.draft = null
-          sc.phase = "synced"
-          sc.read()   // show what the thermostat really has
-          return
-        }
-        sc.adopt(r)
-        sc.note = r.confirmed === false ? "sent; not confirmed yet"
-          : sc.same(sc.base, sent) ? "" : "thermostat set " + sc.fmt(sc.base)
-        if (sc.draft && !sc.same(sc.draft, sent) && sc.draft.mode === sc.base.mode) {
-          // You pressed while it was saving: that newest value goes next.
-          sc.phase = "editing"
-          if (!idle.running) sc.send()
-        } else {
-          sc.draft = null
-          sc.phase = "synced"
-        }
-      }
+    stdout: StdioCollector { onStreamFinished: sc.writeDone(text) }
+  }
+
+  function writeDone(text) {
+    const r = sc.parse(text)
+    const sent = sc.sent
+    sc.sent = null
+    if (!r || r.error || !r.alias) {
+      sc.note = r && r.error || "the change failed"
+      sc.draft = null
+      sc.phase = "synced"
+      sc.read()   // show what the thermostat really has
+      return
+    }
+    sc.adopt(r)
+    sc.note = r.confirmed === false ? "sent; not confirmed yet"
+      : sc.same(sc.base, sent) ? "" : "thermostat set " + sc.fmt(sc.base)
+    if (sc.draft && !sc.same(sc.draft, sent) && sc.draft.mode === sc.base.mode) {
+      // You pressed while it was saving: that newest value goes next.
+      sc.phase = "editing"
+      if (!idle.running) sc.send()
+    } else {
+      sc.draft = null
+      sc.phase = "synced"
     }
   }
 
   Process {
     id: actor
-    stdout: StdioCollector {
-      onStreamFinished: {
-        const r = sc.parse(text)
-        sc.acting = false
-        if (!r || r.error || !r.alias) {
-          sc.note = r && r.error || "the change failed"
-          sc.read()
-          return
-        }
-        sc.adopt(r)
-        sc.phase = "synced"
-      }
+    stdout: StdioCollector { onStreamFinished: sc.actDone(text) }
+  }
+
+  function actDone(text) {
+    const r = sc.parse(text)
+    sc.acting = false
+    if (!r || r.error || !r.alias) {
+      sc.note = r && r.error || "the change failed"
+      sc.read()
+      return
     }
+    sc.adopt(r)
+    sc.phase = "synced"
   }
 
   // When the watcher reports something different (a change at the
@@ -183,7 +211,7 @@ Item {
   // again rather than trusting the file. A draft or a send in progress is
   // left alone.
   onTChanged: {
-    if (!t || (phase !== "synced" && phase !== "unknown")) return
+    if (demo || !t || (phase !== "synced" && phase !== "unknown")) return
     if (!t.available) {
       if (phase === "synced") { phase = "unknown"; note = t.error || "can't reach the thermostat" }
       return

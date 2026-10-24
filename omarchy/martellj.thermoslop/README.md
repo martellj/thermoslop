@@ -94,6 +94,7 @@ Settings, on the widget's entry in `~/.config/omarchy/shell.json`:
 |---|---|
 | `"thermostat": "upstairs"` | Show and control only this thermostat |
 | `"house": "cabin"` | Only this house's thermostats |
+| `"demo": true` | Pretend thermostats in the bar and panel, to try the controls; nothing is read or sent |
 | `"pairingDemo": true` | "Add thermostat" pairs with a pretend thermostat; nothing is saved |
 
 From scripts or keybindings:
