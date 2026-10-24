@@ -36,11 +36,17 @@ version.
   (Alpine/OpenRC, Void/runit, containers) crashed with `FileNotFoundError`.
   It now explains how to run `thermoslop watch` under your own service
   manager or autostart.
+- `thermoslop discover --house cabin` and `thermoslop log --house cabin`
+  ignored `--house`; they now scan only that house's subnets and show only
+  its thermostats' changes.
 - Under `python -m thermoslop`, `setup` now points services at the installed
   `thermoslop` command.
 
 ### Changed
 
+- `-t`/`--thermostat` and `--house` are gone from the help of commands that
+  never used them (`pair`, `setup`, `watch`, `mcp`; `-t` on `discover`).
+  They're still accepted, and ignored, until the next minor release.
 - **BREAKING (panel):** the mode bar that changed every thermostat at once
   is gone. Each card has its own HEAT, COOL, OFF, AWAY and RESUME, acting on
   that thermostat only. A house with several thermostats gets AWAY ALL and
@@ -56,6 +62,12 @@ version.
 
 ### Added
 
+- Better built-in help. `thermoslop --help` groups the commands, shows the
+  first steps, and says where the config and data files live. Each command's
+  help explains what it acts on without `-t`, has examples, and documents
+  every option. New: `thermoslop help COMMAND`, and
+  `thermoslop completion bash|zsh|fish` (completes commands, options, modes,
+  houses and your thermostats' aliases).
 - A `"demo": true` widget setting: pretend thermostats in the bar and panel,
   whose controls respond without reading or sending anything. The plugin
   preview image is taken with it.

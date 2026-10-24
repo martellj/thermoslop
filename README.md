@@ -78,7 +78,8 @@ newly paired thermostats show up in the bar without a manual restart.
 ## Commands
 
 All of them take `--json` (machine-readable; errors come back as
-`{"error": ...}` with exit code 1) and `-t NAME` (alias, prefix ok).
+`{"error": ...}` with exit code 1). The ones that act on thermostats take
+`-t NAME` (alias, prefix ok) and `--house HOUSE`.
 
 Changes return once the thermostat reads back what was asked. If it hasn't
 within 8 seconds, the command prints what it does read and exits **2** ("sent
@@ -91,21 +92,25 @@ reports each, and exits 1 if any failed. With `--json`, failures appear as
 `pair` takes a device id, an address or a name. If two devices share the name
 (a "Main Floor" in each house), it lists them so you can pair by id.
 
-| Command | What it does |
-|---|---|
-| `thermoslop status [--live]` | Temperature, humidity, mode, setpoints, comfort setting, sensors. Uses the watcher's cache when fresh; `--live` asks the thermostat. |
-| `thermoslop set 70` / `set +1` / `set -2` | Target temperature in heat/cool mode. Relative changes also shift both setpoints in auto mode. |
-| `thermoslop set --heat 68 --cool 75` | Auto-mode setpoints. |
-| `thermoslop mode heat\|cool\|auto\|off` | HVAC mode. |
-| `thermoslop home\|away\|sleep [--all]` | Hold a comfort setting. |
-| `thermoslop resume [--all]` | Clear holds and go back to the schedule. |
-| `thermoslop discover [--all]` | Find HomeKit thermostats (or every HomeKit accessory with `--all`). |
-| `thermoslop pair NAME [--demo]`, `thermoslop unpair -t NAME` | Manage pairings (`--demo`: a pretend thermostat, nothing saved). |
-| `thermoslop watch` | The daemon behind the widget (run by `thermoslop-watch.service`). |
-| `thermoslop bar [--format text\|waybar\|swiftbar] [--follow]` | Status-bar output for Waybar, polybar, i3blocks or SwiftBar (see below). |
-| `thermoslop log [--hours 24] [--source S]` | Recent changes and where they came from (see [Change log](#change-log)). |
-| `thermoslop mcp [--read-only]` | MCP server for AI clients (see below). |
-| `thermoslop dump -t NAME` | Raw HomeKit accessory data, for debugging. |
+The everyday ones:
+
+```sh
+thermoslop status                 # every thermostat
+thermoslop set 68 -t upstairs     # or +1 / -2; --heat/--cool in auto mode
+thermoslop mode heat              # heat, cool, auto or off
+thermoslop away --house cabin     # home / away / sleep; resume clears the hold
+thermoslop log                    # what changed, and who changed it
+```
+
+`thermoslop --help` lists every command by group, with where the config and
+data files live. `thermoslop help COMMAND` explains one, with examples. For tab
+completion of commands, options and your thermostats' names:
+
+```sh
+eval "$(thermoslop completion bash)"   # in ~/.bashrc
+eval "$(thermoslop completion zsh)"    # in ~/.zshrc
+thermoslop completion fish > ~/.config/fish/completions/thermoslop.fish
+```
 
 When more than one thermostat is paired, commands that change something need
 `-t`, `--all`, or `default = "alias"` in the config.

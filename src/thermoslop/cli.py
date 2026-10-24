@@ -14,7 +14,7 @@ import sys
 import threading
 import time
 
-from thermoslop import APP, __version__, audit, discovery, ops
+from thermoslop import APP, __version__, audit, cli_help, discovery, ops
 from thermoslop.config import CONFIG_FILE, PAIRING_FILE, load_config, migrate_legacy, secure_existing
 from thermoslop.homekit import (
     COMFORT,
@@ -140,6 +140,15 @@ def _paired_here() -> dict[str, str]:
     return {p.get("AccessoryPairingID", "").lower(): alias for alias, p in pairings.items()}
 
 
+def _houses_of_paired(config) -> dict[str, str | None]:
+    """Alias -> house, from each pairing's last known address (no network)."""
+    try:
+        pairings = json.loads(PAIRING_FILE.read_text())
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+    return {alias: config.house_of(p.get("AccessoryIP")) for alias, p in pairings.items()}
+
+
 def _discovered(d, here: dict[str, str]) -> dict:
     alias = here.get(d.id.lower())
     status = "paired here" if alias else "paired elsewhere" if d.paired else "ready to pair"
@@ -147,7 +156,9 @@ def _discovered(d, here: dict[str, str]) -> dict:
 
 
 async def cmd_discover(args, config) -> int:
-    subnets = args.subnet or config.subnets
+    if args.house is not None and args.house not in config.houses:
+        raise ThermoSlopError(f"unknown house {args.house!r} (config has: {', '.join(config.houses) or 'none'})")
+    subnets = (args.subnet or []) + config.houses[args.house] if args.house else args.subnet or config.subnets
     if args.demo:
         from thermoslop import demo
 
@@ -363,6 +374,11 @@ async def cmd_log(args, config) -> int:
     if args.thermostat:
         key = slugify(args.thermostat)
         found = [e for e in found if any(a.startswith(key) for a in e.get("thermostats", []))]
+    if args.house:
+        if args.house not in config.houses:
+            raise ThermoSlopError(f"unknown house {args.house!r} (config has: {', '.join(config.houses) or 'none'})")
+        in_house = {alias for alias, house in _houses_of_paired(config).items() if house == args.house}
+        found = [e for e in found if in_house & set(e.get("thermostats", []))]
     if args.source:
         found = [e for e in found if e["source"] == args.source]
     found = found[-args.limit:]
@@ -417,91 +433,148 @@ async def cmd_dump(args, config) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--json", action="store_true", help="machine-readable output")
-    common.add_argument("-t", "--thermostat", help="thermostat name/alias (prefix ok)")
-    common.add_argument("--house", help="only thermostats in this house (from [houses] in config)")
-    common.add_argument("-v", "--verbose", action="count", default=0)
+    # Every command: --json and -v. Commands that act on thermostats also take
+    # -t/--house (and --all where several make sense); the rest accept them
+    # hidden and ignore them, so old scripts keep working for now.
+    base = argparse.ArgumentParser(add_help=False)
+    base.add_argument("--json", action="store_true", help="machine-readable output")
+    base.add_argument("-v", "--verbose", action="count", default=0, help="more log output (-vv for debug)")
+    target = argparse.ArgumentParser(add_help=False)
+    target.add_argument("-t", "--thermostat", metavar="NAME", help="thermostat alias or name (a unique prefix is enough)")
+    target.add_argument("--house", help="only thermostats in this house ([houses] in the config)")
+    ignored = argparse.ArgumentParser(add_help=False)
+    ignored.add_argument("-t", "--thermostat", help=argparse.SUPPRESS)
+    ignored.add_argument("--house", help=argparse.SUPPRESS)
+    ignored_t = argparse.ArgumentParser(add_help=False)
+    ignored_t.add_argument("-t", "--thermostat", help=argparse.SUPPRESS)
+    every = "every paired thermostat (with --house, every one in that house)"
 
-    p = argparse.ArgumentParser(prog=APP, description=__doc__, parents=[common])
+    p = argparse.ArgumentParser(prog=APP, usage=f"{APP} COMMAND [options]", description=cli_help.top_description(),
+                                epilog=cli_help.top_epilog(), formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--version", action="version", version=f"{APP} {__version__}")
-    sub = p.add_subparsers(dest="command", required=True)
+    # Accepted before the command for old scripts; the command's own options win.
+    for flags, kw in ((["--json"], {"action": "store_true"}), (["-v", "--verbose"], {"action": "count"}),
+                      (["-t", "--thermostat"], {}), (["--house"], {})):
+        p.add_argument(*flags, help=argparse.SUPPRESS, default=argparse.SUPPRESS, **kw)
+    # The grouped list in the description replaces argparse's own command list.
+    sub = p.add_subparsers(dest="command", required=True, metavar="COMMAND", help=argparse.SUPPRESS)
 
-    s = sub.add_parser("status", parents=[common], help="current temperature, setpoints, sensors")
-    s.add_argument("--live", action="store_true", help="skip the watch cache, ask the thermostat")
+    def command(name: str, *parents: argparse.ArgumentParser, plain: bool = False) -> argparse.ArgumentParser:
+        """`plain`: no --json/-v (help and completion print text and never log)."""
+        return sub.add_parser(name, parents=[*([] if plain else [base]), *parents], **cli_help.command_kwargs(name))
+
+    s = command("status", target)
+    s.add_argument("--live", action="store_true", help="ask the thermostats even if the watcher's readings are fresh")
     s.set_defaults(func=cmd_status)
 
-    s = sub.add_parser("set", parents=[common], help="set target temperature: 70, +1, -2, or --heat/--cool")
-    s.add_argument("temperature", nargs="?", help="absolute (70) or relative (+1, -1)")
-    s.add_argument("--heat", type=float, help="heat setpoint (auto mode)")
-    s.add_argument("--cool", type=float, help="cool setpoint (auto mode)")
+    s = command("set", target)
+    s.add_argument("temperature", nargs="?", help="absolute (70) or relative to the current target (+1, -2)")
+    s.add_argument("--heat", type=float, metavar="DEGREES", help="heat setpoint, in auto mode")
+    s.add_argument("--cool", type=float, metavar="DEGREES", help="cool setpoint, in auto mode")
     s.set_defaults(func=cmd_set)
 
-    s = sub.add_parser("mode", parents=[common], help="HVAC mode")
-    s.add_argument("mode", choices=list(HVAC_MODES.values()))
+    s = command("mode", target)
+    s.add_argument("mode", choices=list(HVAC_MODES.values()), metavar="MODE",
+                   help="; ".join(f"{m}: {cli_help.MODE_HELP[m]}" for m in HVAC_MODES.values()))
     s.set_defaults(func=cmd_mode)
 
     for comfort in COMFORT.values():
-        s = sub.add_parser(comfort, parents=[common], help=f"hold the {comfort} comfort setting")
-        s.add_argument("--all", action="store_true", help="every paired thermostat (or every one in --house)")
+        s = command(comfort, target)
+        s.add_argument("--all", action="store_true", help=every)
         s.set_defaults(func=cmd_comfort, comfort=comfort)
 
-    s = sub.add_parser("resume", parents=[common], help="clear holds and resume the schedule")
-    s.add_argument("--all", action="store_true", help="every paired thermostat (or every one in --house)")
+    s = command("resume", target)
+    s.add_argument("--all", action="store_true", help=every)
     s.set_defaults(func=cmd_resume)
 
-    s = sub.add_parser("discover", parents=[common], help="find HomeKit thermostats on the network")
-    s.add_argument("--subnet", action="append", help="also scan this subnet by unicast (repeatable)")
-    s.add_argument("--timeout", type=float, default=3.0)
+    s = command("log", target)
+    s.add_argument("--hours", type=float, default=24, help="how far back (default 24)")
+    s.add_argument("-n", "--limit", type=int, default=50, help="at most this many entries, newest kept (default 50)")
+    s.add_argument("--source", choices=audit.SOURCES, help="only changes from this source")
+    s.set_defaults(func=cmd_log)
+
+    s = command("discover", ignored_t)
+    s.add_argument("--house", help="scan only this house's subnets ([houses] in the config)")
+    s.add_argument("--subnet", action="append", metavar="CIDR",
+                   help="also ask every address in this subnet, e.g. 192.0.2.0/24 (repeatable)")
+    s.add_argument("--timeout", type=float, default=3.0, metavar="SECONDS", help="how long to listen (default 3)")
     s.add_argument("--all", action="store_true", help="show every HomeKit accessory, not just thermostats")
     s.add_argument("--demo", action="store_true", help="pretend thermostats, to preview pairing (no network)")
     s.set_defaults(func=cmd_discover)
 
-    s = sub.add_parser("pair", parents=[common], help="pair with a thermostat using its HomeKit code")
-    s.add_argument("device", help="device id, IP, or name from `thermoslop discover` (use the id if names repeat)")
-    s.add_argument("--pin", help="HomeKit code XXX-XX-XXX (prompted if omitted)")
-    s.add_argument("--alias", help="short name to use (default: slug of the device name)")
-    s.add_argument("--subnet", action="append")
+    s = command("pair", ignored)
+    s.add_argument("device", help="device id, address or name from `thermoslop discover` (the id if names repeat)")
+    s.add_argument("--pin", metavar="CODE", help="the HomeKit code XXX-XX-XXX (asked for if omitted)")
+    s.add_argument("--alias", help="short name for it (default: from the device name, e.g. main-floor)")
+    s.add_argument("--subnet", action="append", metavar="CIDR",
+                   help="also look for the device in this subnet (repeatable)")
     s.add_argument("--demo", action="store_true", help="pair with a pretend thermostat; nothing is saved")
     s.set_defaults(func=cmd_pair)
 
-    s = sub.add_parser("unpair", parents=[common], help="remove a pairing")
+    s = command("unpair", target)
     s.set_defaults(func=cmd_unpair)
 
-    s = sub.add_parser("watch", parents=[common], help="daemon: keep the bar widget's state fresh")
-    s.set_defaults(func=cmd_watch)
-
-    s = sub.add_parser("mcp", parents=[common], help="MCP server for AI clients (stdio, or --http on the tailnet)")
-    s.add_argument("--read-only", action="store_true", help="offer only the status tools")
-    s.add_argument("--http", action="store_true", help="serve streamable HTTP on this machine's Tailscale address")
-    s.add_argument("--bind", help="Tailscale address to listen on (default: `tailscale ip -4`)")
-    s.add_argument("--port", type=int, help="port (default: [mcp] http_port, 8765)")
-    s.set_defaults(func=cmd_mcp)
-
-    s = sub.add_parser("log", parents=[common], help="recent changes, from any source (terminal, widget, MCP, thermostat/app)")
-    s.add_argument("--hours", type=float, default=24, help="how far back (default 24)")
-    s.add_argument("-n", "--limit", type=int, default=50, help="at most this many entries (newest)")
-    s.add_argument("--source", choices=audit.SOURCES, help="only changes from this source")
-    s.set_defaults(func=cmd_log)
-
-    s = sub.add_parser("bar", parents=[common], help="status-bar output from the watcher's state (Waybar, SwiftBar, i3blocks…)")
-    s.add_argument("--format", choices=["text", "waybar", "swiftbar"], default="text")
-    s.add_argument("--follow", action="store_true", help="print again whenever the state changes")
-    s.set_defaults(func=cmd_bar)
-
-    s = sub.add_parser("setup", parents=[common], help="install the background services (systemd or launchd)")
-    s.add_argument("--remove", action="store_true", help="stop and remove them (keeps pairings and history)")
+    s = command("setup", ignored)
+    s.add_argument("--remove", action="store_true", help="stop and remove the services (keeps pairings and history)")
     s.add_argument("--yes", action="store_true", help="don't ask; also adds the Omarchy plugin when on Omarchy")
     s.add_argument("--no-plugin", action="store_true", help="don't offer the Omarchy plugin")
     s.set_defaults(func=cmd_setup)
 
-    s = sub.add_parser("dump", parents=[common], help="raw HomeKit accessory data (debugging)")
+    s = command("watch", ignored)
+    s.set_defaults(func=cmd_watch)
+
+    s = command("mcp", ignored)
+    s.add_argument("--read-only", action="store_true", help="offer only the status tools")
+    s.add_argument("--http", action="store_true", help="serve streamable HTTP on this machine's Tailscale address")
+    s.add_argument("--bind", metavar="ADDRESS", help="Tailscale address to listen on (default: `tailscale ip -4`)")
+    s.add_argument("--port", type=int, help="port (default: [mcp] http_port, 8765)")
+    s.set_defaults(func=cmd_mcp)
+
+    s = command("bar", target)
+    s.add_argument("--format", choices=["text", "waybar", "swiftbar"], default="text",
+                   help="text: one line (i3blocks, polybar); waybar: JSON; swiftbar: menu with actions")
+    s.add_argument("--follow", action="store_true", help="print again whenever the state changes")
+    s.set_defaults(func=cmd_bar)
+
+    s = command("dump", target)
     s.set_defaults(func=cmd_dump)
+
+    s = command("help", plain=True)
+    s.add_argument("topic", nargs="?", metavar="COMMAND", help="the command to explain")
+    s.set_defaults(func=None)
+
+    s = command("completion", plain=True)
+    s.add_argument("shell", nargs="?", choices=list(cli_help.SHELLS), help="bash, zsh or fish")
+    s.add_argument("--aliases", action="store_true", help=argparse.SUPPRESS)
+    s.add_argument("--houses", action="store_true", help=argparse.SUPPRESS)
+    s.set_defaults(func=None)
     return p
 
 
+def _help_or_completion(parser: argparse.ArgumentParser, args) -> int:
+    """`help` and `completion` need no config, network or event loop."""
+    if args.command == "help":
+        if not args.topic:
+            parser.print_help()
+            return 0
+        if args.topic not in cli_help.COMMANDS:
+            print(f"{APP}: no command {args.topic!r}; commands: {', '.join(cli_help.COMMANDS)}", file=sys.stderr)
+            return 2
+        parser.parse_args([args.topic, "--help"])  # prints and exits
+    if args.aliases or args.houses:
+        print("\n".join(cli_help.aliases() if args.aliases else cli_help.houses()))
+        return 0
+    if not args.shell:
+        parser.parse_args(["completion", "--help"])
+    print(cli_help.SHELLS[args.shell](parser), end="")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> None:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.command in ("help", "completion"):
+        sys.exit(_help_or_completion(parser, args))
     level = logging.DEBUG if args.verbose > 1 else logging.INFO if args.verbose or args.command == "watch" else logging.WARNING
     logging.basicConfig(level=level, format="%(levelname)s %(name)s: %(message)s")
     migrate_legacy()
