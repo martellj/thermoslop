@@ -8,6 +8,8 @@ version.
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-10-25
+
 ### Security
 
 - The Omarchy panel no longer lets device text render as rich text. Qt
