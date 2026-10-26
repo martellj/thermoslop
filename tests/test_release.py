@@ -66,3 +66,16 @@ def test_check_plugin_without_omarchy(tmp_path, monkeypatch):
 
 def test_check_version_agrees_now():
     assert subprocess.run([sys.executable, SCRIPTS / "check-version"], capture_output=True).returncode == 0
+
+
+
+def test_release_reminds_about_unreleased_doc_notes(tmp_path):
+    docs = tmp_path / "docs"
+    (docs / "reference").mkdir(parents=True)
+    (docs / "mcp.md").write_text("# MCP\n\n!!! note\n    New in 0.4 (unreleased): resources.\n")
+    (docs / "other.md").write_text("Nothing pending here.\n")
+    (docs / "reference" / "gen.md").write_text("new in 0.4 (unreleased)\n")  # generated: ignored
+    script = runpy.run_path(str(SCRIPTS / "release"))
+    assert script["unreleased_notes"](docs) == ["docs/mcp.md:4"]
+    (docs / "mcp.md").write_text("# MCP\n")
+    assert script["unreleased_notes"](docs) == []

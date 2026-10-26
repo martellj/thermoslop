@@ -40,6 +40,13 @@ def fail(msg: str) -> None:
     sys.exit(1)
 
 
+def unreleased_notes(docs: Path = ROOT / "docs") -> list[str]:
+    """Docs pages still marking something "new in X.Y (unreleased)"."""
+    pattern = re.compile(r"new in [\d.]+ \(unreleased\)", re.I)
+    return [f"{page.relative_to(docs.parent)}:{n}" for page in sorted(docs.rglob("*.md")) if "reference" not in page.parts
+            for n, line in enumerate(page.read_text().splitlines(), 1) if pattern.search(line)]
+
+
 def numbers(v: str) -> tuple[int, ...]:
     return tuple(map(int, v.split(".")))
 
@@ -97,6 +104,10 @@ def main() -> None:
     sh("git", "commit", "-q", "-m", f"Release v{version}")
     sh("git", "tag", "-a", f"v{version}", "-m", f"ThermoSlop {version}")
     print(f"release: committed and tagged v{version}. Review it, then: git push --follow-tags")
+    if notes := unreleased_notes():
+        print("release: reminder: the docs still say 'new in … (unreleased)'; update them for this version:")
+        for note in notes:
+            print(f"  {note}")
 
 
 if __name__ == "__main__":

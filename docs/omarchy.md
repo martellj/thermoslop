@@ -35,6 +35,8 @@ switch use `thermoslop mode heat --all --house home`.
 **+ ADD THERMOSTAT** pairs a new one without a terminal: it scans, PAIR starts
 pairing, and it asks for the code the thermostat shows at that moment.
 
+![Add thermostat, with the pairing demo](assets/add-thermostat.png){ width="400" }
+
 ## Bar clicks
 
 | | |
