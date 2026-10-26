@@ -76,6 +76,27 @@ version.
   (macOS menu bar with actions). `--follow` updates on every state change.
   It reads only the watcher's state file.
 
+## [0.2.3] - 2026-10-25
+
+### Security
+
+- The Omarchy panel no longer lets device text render as rich text. Qt
+  guessed "rich text" from content, so a device on the LAN could advertise
+  a name or model with `<img src="http://…">`, and opening Add thermostat
+  fetched that URL before anything was paired. Every label in the plugin is
+  now plain text, and a test keeps it that way. Reported in the Omarchy
+  plugin marketplace review.
+- Text from devices (discovery names, models and fields, thermostat names)
+  is cleaned where it enters: control characters (terminal escape
+  sequences) and bidirectional overrides are removed, and it's cut to 64
+  characters. This protects terminal output, the state file and MCP results.
+
+### Documentation
+
+- `SECURITY.md` lists the untrusted text sources and how each display
+  handles them; `RELEASING.md` has a security checklist for marketplace
+  submissions, and how to cut a patch from a maintenance branch.
+
 ## [0.2.2] - 2026-10-22
 
 ### Changed

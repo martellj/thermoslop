@@ -12,6 +12,7 @@ Reads only the watcher's state file (no network), so bars can run it often:
 
 from __future__ import annotations
 
+import html
 import json
 import sys
 import time
@@ -102,6 +103,17 @@ def stale_reason(watcher: bool) -> str:
     return UNREACHABLE if watcher else WATCHER_OFFLINE
 
 
+def pango(text: str) -> str:
+    """Waybar reads `text` and `tooltip` as Pango markup; device names are untrusted."""
+    return html.escape(text, quote=False)
+
+
+def swiftbar_safe(text: str) -> str:
+    """SwiftBar splits a line at ` | ` into title and parameters (bash=, href=…),
+    and each line is one item: a thermostat name must not add either."""
+    return " ".join(text.replace("|", " ").split())
+
+
 def waybar(states: list[dict], now: float, filtered: bool = False, watcher: bool = False) -> str:
     cond = condition(states, now)
     if cond == "empty":
@@ -111,7 +123,8 @@ def waybar(states: list[dict], now: float, filtered: bool = False, watcher: bool
         if cond == "stale":
             lines.append(stale_reason(watcher))
         tooltip = "\n".join(lines)
-    return json.dumps({"text": text(states, now), "tooltip": tooltip, "class": [cond], "alt": cond}, ensure_ascii=False)
+    return json.dumps({"text": pango(text(states, now)), "tooltip": pango(tooltip), "class": [cond], "alt": cond},
+                      ensure_ascii=False)
 
 
 def swiftbar(states: list[dict], now: float, binary: str, filtered: bool = False, watcher: bool = False) -> str:
@@ -132,7 +145,7 @@ def swiftbar(states: list[dict], now: float, binary: str, filtered: bool = False
         if len(live_here) < 2:
             return []
         scope = ["--all", "--house", house] if house else ["--all"]
-        where = f" at {house.title()}" if house else ""
+        where = f" at {swiftbar_safe(house.title())}" if house else ""
         return [action(f"{indent}Away (all {len(live_here)}{where})", "away", *scope),
                 action(f"{indent}Resume schedule (all {len(live_here)}{where})", "resume", *scope)]
 
@@ -141,9 +154,9 @@ def swiftbar(states: list[dict], now: float, binary: str, filtered: bool = False
     for s in states:
         if houses and s.get("house") != current:
             current = s.get("house")
-            lines.append(f"{(current or 'other').title()} | size=11 color=gray")
+            lines.append(f"{swiftbar_safe((current or 'other').title())} | size=11 color=gray")
             lines += house_actions(current, "--") if current else []
-        lines.append(describe(s))
+        lines.append(swiftbar_safe(describe(s)))
         if s.get("available"):
             if s.get("mode") in ("heat", "cool", "auto"):
                 lines.append(action("--Raise 1°", "set", "+1", "-t", s["alias"]))

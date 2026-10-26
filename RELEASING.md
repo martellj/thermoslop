@@ -43,6 +43,32 @@ To check a release without publishing, run the Release workflow by hand
 (Actions → Release → Run workflow). Everything up to the smoke tests runs;
 the publish jobs only run for tags.
 
+## Security check before a marketplace submission or update
+
+The Omarchy marketplace's automated baseline only matches a few patterns, and a
+maintainer then reviews the exact commit by hand. Before submitting or
+promoting a release:
+- the hostile-text tests pass (`tests/test_device_text.py`,
+  `tests/test_plugin_text.py`)
+- every new place that shows device text, or builds a command or markup, is in
+  the tables under "Untrusted text" in `SECURITY.md` and handled there
+- no new QML `Text` relies on Qt's rich-text auto-detection, and no new code
+  passes device text through a shell string
+- a security review of the diff since the last promoted release (for example
+  `/security-review` in Claude Code)
+
+## Patch releases from a maintenance branch
+
+To release a fix without what's on `main`, branch from the last tag and cut
+the patch there:
+```bash
+git switch -c release/0.2 v0.2.2   # once per minor version
+# commit the fix, push the branch, then:
+scripts/release 0.2.3
+```
+`scripts/release` accepts only patch versions on a `release/X.Y` branch.
+Afterwards, merge the branch into `main` so the fix isn't lost.
+
 ## When a run fails partway
 
 Every publish step skips what already exists:
