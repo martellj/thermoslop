@@ -23,6 +23,7 @@ from aiohomekit.zeroconf import ZeroconfServiceListener
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncZeroconf
 
 from thermoslop import discovery
+from thermoslop.text import clean
 from thermoslop.config import CHARMAP_FILE, DATA_DIR, PAIRING_FILE, STATE_FILE, Config, private_dir
 
 log = logging.getLogger(__name__)
@@ -121,7 +122,7 @@ def _sensors(accessories: Accessories, units: str) -> list[dict]:
             continue
         sensors.append(
             {
-                "name": acc.name,
+                "name": clean(acc.name),
                 "temperature": _reading(temp, units),
                 "occupied": None if occupied is None else bool(occupied),
             }
@@ -143,7 +144,7 @@ def thermostat_state(
     humidity = svc.value(CT.RELATIVE_HUMIDITY_CURRENT)
     return {
         "alias": alias,
-        "name": acc.name,
+        "name": clean(acc.name),
         "house": house,
         "available": True,
         "units": units,

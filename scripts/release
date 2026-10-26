@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Cut a release: scripts/release X.Y.Z
 
-Refuses unless on a clean `main` that matches origin and the tests pass. Then:
+Refuses unless on a clean `main` (or, for a patch X.Y.Z with Z > 0, a
+`release/X.Y` branch) that matches origin and the tests pass. Then:
 1. sets X.Y.Z in __init__.py, the plugin manifest and the widget's requiredVersion
 2. turns CHANGELOG.md's "Unreleased" section into "X.Y.Z - <date>"
 3. builds the wheel and sdist and runs scripts/check-dist on them (with the
@@ -52,14 +53,20 @@ def main() -> None:
     if numbers(version) <= numbers(current):
         fail(f"{version} isn't newer than {current}")
 
-    if sh("git", "rev-parse", "--abbrev-ref", "HEAD") != "main":
-        fail("not on main")
+    branch = sh("git", "rev-parse", "--abbrev-ref", "HEAD")
+    patch_branch = re.fullmatch(r"release/(\d+)\.(\d+)", branch)
+    if branch == "main":
+        pass
+    elif patch_branch and version.startswith(f"{patch_branch[1]}.{patch_branch[2]}.") and not version.endswith(".0"):
+        pass  # a patch release from a maintenance branch
+    else:
+        fail(f"not on main (or on release/X.Y for a patch X.Y.Z); on {branch}")
     if sh("git", "status", "--porcelain"):
         fail("working tree isn't clean")
     if "--no-fetch" not in sys.argv:
         sh("git", "fetch", "--quiet", "origin")
-        if sh("git", "rev-parse", "HEAD") != sh("git", "rev-parse", "origin/main"):
-            fail("main differs from origin/main; pull or push first")
+        if sh("git", "rev-parse", "HEAD") != sh("git", "rev-parse", f"origin/{branch}", check=False):
+            fail(f"{branch} differs from origin/{branch}; pull or push first")
     if sh("git", "tag", "--list", f"v{version}"):
         fail(f"tag v{version} already exists")
 

@@ -321,6 +321,7 @@ Panel {
                 anchors.verticalCenter: parent.verticalCenter
 
                 Text {
+                  textFormat: Text.PlainText
                   anchors.centerIn: parent
                   text: "󰔏"
                   color: root.accent
@@ -336,6 +337,7 @@ Panel {
                 Row {
                   spacing: Style.space(8)
                   Text {
+                    textFormat: Text.PlainText
                     text: "ThermoSlop"
                     color: root.fg
                     font.family: root.font
@@ -361,6 +363,7 @@ Panel {
                     color: parent.fresh ? root.good : root.bad
                   }
                   Text {
+                    textFormat: Text.PlainText
                     text: parent.fresh
                       ? root.live.length + (root.live.length === 1 ? " zone" : " zones") + " live · "
                         + root.ago(root.now - (root.hostWidget ? root.hostWidget.updatedAt : 0))
@@ -397,6 +400,7 @@ Panel {
               anchors.margins: Style.space(14)
               spacing: Style.space(8)
               Text {
+                textFormat: Text.PlainText
                 width: parent.width
                 wrapMode: Text.WordWrap
                 text: root.cliState === "missing"
@@ -408,6 +412,7 @@ Panel {
                 font.pixelSize: Style.font.body
               }
               Text {
+                textFormat: Text.PlainText
                 width: parent.width
                 wrapMode: Text.WrapAnywhere
                 text: root.hostWidget ? (root.cliState === "missing" ? root.hostWidget.installHint : root.hostWidget.upgradeHint) : ""
@@ -417,6 +422,7 @@ Panel {
                 font.bold: true
               }
               Text {
+                textFormat: Text.PlainText
                 visible: root.cliState === "missing"
                 text: "Then restart the shell: omarchy restart shell"
                 color: root.dim
@@ -440,6 +446,7 @@ Panel {
               spacing: Style.space(6)
 
               Text {
+                textFormat: Text.PlainText
                 visible: zone.showHouse
                 text: (zone.t.house || "other").toUpperCase()
                 color: root.dim
@@ -477,6 +484,7 @@ Panel {
                         color: zone.t.available ? (zone.t.action === "idle" ? root.accent : root.actionColor(zone.t)) : root.bad
                       }
                       Text {
+                        textFormat: Text.PlainText
                         text: (zone.t.name || zone.t.alias).toUpperCase()
                         color: root.fg
                         font.family: root.font
@@ -529,6 +537,7 @@ Panel {
 
                       Row {
                         Text {
+                          textFormat: Text.PlainText
                           id: bigTemp
                           text: root.num(zone.t.temperature, 1)
                           color: root.fg
@@ -538,6 +547,7 @@ Panel {
                           font.bold: true
                         }
                         Text {
+                          textFormat: Text.PlainText
                           text: "°" + (zone.t.units || "F")
                           color: root.accent
                           font.family: root.font
@@ -547,6 +557,7 @@ Panel {
                         }
                       }
                       Text {
+                        textFormat: Text.PlainText
                         visible: zone.t.humidity !== null && zone.t.humidity !== undefined
                         text: "󰖌 " + zone.t.humidity + "% RH"
                         color: root.dim
@@ -572,6 +583,7 @@ Panel {
                         spacing: Style.space(6)
 
                         Text {
+                          textFormat: Text.PlainText
                           anchors.right: parent.right
                           text: "SET (" + (zone.t.mode || "—").toUpperCase() + ")"
                           color: root.dim
@@ -588,6 +600,7 @@ Panel {
                             onClicked: root.nudge(zone.t.alias, -1)
                           }
                           Text {
+                            textFormat: Text.PlainText
                             anchors.verticalCenter: parent.verticalCenter
                             text: root.setpointText(zone.t)
                             color: root.pending[zone.t.alias] ? root.accent : root.fg
@@ -614,6 +627,7 @@ Panel {
                     height: Math.max(trendLabel.implicitHeight, Style.space(20))
 
                     Text {
+                      textFormat: Text.PlainText
                       id: trendLabel
                       anchors.left: parent.left
                       anchors.verticalCenter: parent.verticalCenter
@@ -646,7 +660,7 @@ Panel {
                       anchors.verticalCenter: parent.verticalCenter
                       textFormat: Text.StyledText
                       text: delta === null ? "" : "Target Δ <font color='" + (delta >= 0 ? root.good : root.accent) + "'>"
-                        + (delta >= 0 ? "+" : "") + delta.toFixed(1) + "°" + (zone.t.units || "F") + "</font>"
+                        + (delta >= 0 ? "+" : "") + delta.toFixed(1) + "°" + (zone.t.units === "C" ? "C" : "F") + "</font>"
                       color: root.dim
                       font.family: root.font
                       font.pixelSize: Style.font.bodySmall
@@ -735,6 +749,7 @@ Panel {
                 id: addTitle
                 spacing: Style.space(8)
                 Text {
+                  textFormat: Text.PlainText
                   text: "ADD THERMOSTAT"
                   color: root.fg
                   font.family: root.font
@@ -758,6 +773,7 @@ Panel {
                 visible: ["scanning", "starting", "verifying"].includes(root.pairStage)
                 spacing: Style.space(10)
                 Text {
+                  textFormat: Text.PlainText
                   id: spinner
                   text: "󰑓"
                   color: root.accent
@@ -772,6 +788,7 @@ Panel {
                   anchors.verticalCenter: parent.verticalCenter
                   spacing: Style.space(2)
                   Text {
+                    textFormat: Text.PlainText
                     text: root.pairStage === "scanning" ? "Looking for HomeKit thermostats…"
                       : root.pairStage === "starting" ? "Starting pairing with " + root.pairName + "…"
                       : "Checking the code…"
@@ -780,6 +797,7 @@ Panel {
                     font.pixelSize: Style.font.body
                   }
                   Text {
+                    textFormat: Text.PlainText
                     visible: root.pairStage === "starting"
                     text: "It shows a fresh code once pairing starts."
                     color: root.dim
@@ -815,6 +833,7 @@ Panel {
                       anchors.verticalCenter: parent.verticalCenter
                       spacing: Style.space(2)
                       Text {
+                        textFormat: Text.PlainText
                         text: deviceRow.modelData.name
                         color: root.fg
                         font.family: root.font
@@ -822,6 +841,7 @@ Panel {
                         font.bold: true
                       }
                       Text {
+                        textFormat: Text.PlainText
                         text: [deviceRow.modelData.model, deviceRow.modelData.address].filter(x => x).join(" · ") || "paired as " + deviceRow.modelData.alias
                         color: root.dim
                         font.family: root.font
@@ -850,6 +870,7 @@ Panel {
                 }
 
                 Text {
+                  textFormat: Text.PlainText
                   visible: !root.found.some(d => d.status === "ready to pair")
                   width: parent.width
                   wrapMode: Text.WordWrap
@@ -872,6 +893,7 @@ Panel {
                 spacing: Style.space(8)
 
                 Text {
+                  textFormat: Text.PlainText
                   text: "Enter the code " + root.pairName + " shows now"
                   color: root.fg
                   font.family: root.font
@@ -879,6 +901,7 @@ Panel {
                   font.bold: true
                 }
                 Text {
+                  textFormat: Text.PlainText
                   width: parent.width
                   wrapMode: Text.WordWrap
                   text: "On the thermostat: Menu → Settings → HomeKit. It changes when pairing starts, so use the one on screen now."
@@ -887,6 +910,7 @@ Panel {
                   font.pixelSize: Style.font.bodySmall
                 }
                 Text {
+                  textFormat: Text.PlainText
                   visible: root.pairHint !== ""
                   text: root.pairHint
                   color: root.cool
@@ -921,6 +945,7 @@ Panel {
                 visible: root.pairStage === "done"
                 spacing: Style.space(6)
                 Text {
+                  textFormat: Text.PlainText
                   text: "󰄬 Paired " + (root.paired ? root.paired.name + " as '" + root.paired.alias + "'" : "")
                   color: root.good
                   font.family: root.font
@@ -928,6 +953,7 @@ Panel {
                   font.bold: true
                 }
                 Text {
+                  textFormat: Text.PlainText
                   text: root.paired && root.paired.demo ? "Demo: nothing was saved; your pairings are unchanged."
                     : "It appears in the bar once the watcher picks it up (a few seconds)."
                   color: root.dim
@@ -947,6 +973,7 @@ Panel {
                 width: parent.width
                 spacing: Style.space(8)
                 Text {
+                  textFormat: Text.PlainText
                   width: parent.width
                   wrapMode: Text.WordWrap
                   text: root.pairError
@@ -1004,6 +1031,7 @@ Panel {
       anchors.centerIn: parent
       spacing: Style.space(4)
       Text {
+        textFormat: Text.PlainText
         visible: badge.glyph !== ""
         text: badge.glyph
         color: badge.tint
@@ -1011,6 +1039,7 @@ Panel {
         font.pixelSize: Style.font.caption
       }
       Text {
+        textFormat: Text.PlainText
         text: badge.text
         color: badge.tint
         font.family: root.font
@@ -1037,6 +1066,7 @@ Panel {
     opacity: enabled ? 1 : 0.4
 
     Text {
+      textFormat: Text.PlainText
       id: textButtonLabel
       anchors.centerIn: parent
       text: textButton.text
@@ -1069,6 +1099,7 @@ Panel {
     opacity: enabled ? 1 : 0.35
 
     Text {
+      textFormat: Text.PlainText
       anchors.centerIn: parent
       text: step.text
       color: root.fg
@@ -1102,6 +1133,7 @@ Panel {
       anchors.centerIn: parent
       spacing: Style.space(3)
       Text {
+        textFormat: Text.PlainText
         anchors.horizontalCenter: parent.horizontalCenter
         text: mode.glyph
         color: mode.active ? mode.activeTint : root.dim
@@ -1109,6 +1141,7 @@ Panel {
         font.pixelSize: Style.font.iconLarge
       }
       Text {
+        textFormat: Text.PlainText
         anchors.horizontalCenter: parent.horizontalCenter
         text: mode.label
         color: mode.active ? mode.activeTint : root.dim
@@ -1163,6 +1196,7 @@ Panel {
       }
     }
     Text {
+      textFormat: Text.PlainText
       anchors.centerIn: parent
       text: ring.glyph
       color: ring.tint
@@ -1182,6 +1216,7 @@ Panel {
     onWidthChanged: sparkCanvas.requestPaint()
 
     Text {
+      textFormat: Text.PlainText
       visible: spark.points.length < 2
       anchors.verticalCenter: parent.verticalCenter
       text: "collecting…"

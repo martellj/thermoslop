@@ -20,6 +20,8 @@ from zeroconf import DNSIncoming, DNSOutgoing, DNSQuestion, DNSPointer, DNSServi
 from zeroconf.asyncio import AsyncServiceBrowser, AsyncServiceInfo, AsyncZeroconf
 from zeroconf.const import _CLASS_IN, _FLAGS_QR_QUERY, _TYPE_PTR, _TYPE_SRV, _TYPE_TXT
 
+from thermoslop.text import clean
+
 HAP_TYPE = "_hap._tcp.local."
 MDNS_PORT = 5353
 
@@ -46,6 +48,11 @@ class Device:
     @property
     def is_thermostat(self) -> bool:
         return self.category == Categories.THERMOSTAT
+
+    def __post_init__(self) -> None:
+        # Discovery answers are unauthenticated: clean what a device says about itself.
+        for field in ("name", "id", "model", "protocol_version"):
+            setattr(self, field, clean(getattr(self, field)))
 
     def to_service(self) -> HomeKitService:
         return HomeKitService(

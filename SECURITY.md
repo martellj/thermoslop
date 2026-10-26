@@ -70,6 +70,29 @@ Out of scope: an attacker who already has your user account, or control of a
 device that's on your tailnet and in your allow-list. Restrict port 8765 in
 your Tailscale ACLs as well, for defence in depth.
 
+## Untrusted text
+
+Some text ThermoSlop shows comes from devices, and isn't trusted:
+
+| Source | Who controls it |
+|---|---|
+| Discovery answers (names, models, TXT records) | **Anyone on the LAN**: discovery is unauthenticated |
+| A paired thermostat's name | Whoever can rename it (its screen, the ecobee app) |
+| MCP calls over HTTP | Callers in `[mcp] allow` (see above) |
+| The config file | You |
+
+Device text is cleaned where it enters (`thermoslop/text.py`): control
+characters, which carry terminal escape sequences, and bidirectional overrides
+are removed, and it's cut to 64 characters. Then each place that interprets
+text handles its own syntax:
+
+| Where it's shown | How |
+|---|---|
+| The Omarchy panel (Qt) | Every label is plain text; Qt's rich-text auto-detection (which loads `<img src>` URLs) is never used on device text. A test enforces this. |
+| Terminal output | Cleaned at the source: no escape sequences reach it. |
+| Commands the plugin runs | Arguments are passed as argument lists, or shell-quoted. |
+| AI clients (MCP) | Cleaned and length-limited. A thermostat name is still text an agent reads, so treat names as untrusted input in agent workflows. |
+
 ## Not affiliated
 
 ThermoSlop is unofficial and not affiliated with ecobee Inc. or Apple Inc.
