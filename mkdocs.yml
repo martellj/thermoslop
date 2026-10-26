@@ -4,9 +4,13 @@
 site_name: ThermoSlop
 site_url: https://thermoslop.com/
 site_description: Local HomeKit control for ecobee thermostats, from the terminal, a status bar or an AI client. Unofficial.
-repo_url: https://github.com/martellj/thermoslop
-repo_name: martellj/thermoslop
-edit_uri: edit/main/docs/
+# No repo_url: Material's repository widget calls api.github.com from every
+# visitor's browser. The footer links to GitHub instead.
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/martellj/thermoslop
+      name: ThermoSlop on GitHub
 copyright: >-
   Unofficial: not affiliated with, endorsed by, or supported by ecobee Inc. or Apple Inc.
   "ecobee" and "HomeKit" are their trademarks, used only to say what this works with. MIT licensed.
