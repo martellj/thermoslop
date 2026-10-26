@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""Write the docs site's CLI reference (docs/reference/*.md) from the parser.
+
+The pages are made from the same parser that prints `thermoslop --help`, so
+they can't drift from it. Fails if a command isn't documented. The docs build
+runs this through scripts/docs_hooks.py; run it by hand to preview:
+
+    scripts/gen-cli-docs [OUT_DIR]
+"""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import io
+import os
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "src"))
+
+from thermoslop import cli, cli_help  # noqa: E402
+
+INTRO = {
+    "control": "Read and change thermostats, and see what changed.",
+    "pairing": "Find thermostats on the network and pair or unpair them.",
+    "services": "The background watcher, the MCP server for AI clients, and status-bar output.",
+    "troubleshooting": "Debugging, help and shell completion.",
+}
+
+
+def _help(parser: argparse.ArgumentParser, args: list[str]) -> str:
+    out = io.StringIO()
+    os.environ["COLUMNS"] = "88"
+    with contextlib.redirect_stdout(out), contextlib.suppress(SystemExit):
+        parser.parse_args(args)
+    return out.getvalue().rstrip()
+
+
+def generate(out_dir: Path) -> list[Path]:
+    parser = cli.build_parser()
+    sub = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+    missing = set(sub.choices) - set(cli_help.COMMANDS)
+    if missing:
+        raise SystemExit(f"gen-cli-docs: undocumented command(s): {', '.join(sorted(missing))}")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written = []
+    for group in cli_help.GROUPS:
+        title = cli_help.GROUP_TITLES[group]
+        lines = [f"# {title}", "", INTRO[group], "",
+                 "!!! note \"Generated\"",
+                 "    This page is made from `thermoslop --help` at build time.", ""]
+        for name, (g, summary, _, _) in cli_help.COMMANDS.items():
+            if g != group:
+                continue
+            lines += [f"## `thermoslop {name}`", "", summary[0].upper() + summary[1:] + ".", "",
+                      "```text", _help(parser, [name, "--help"]), "```", ""]
+        path = out_dir / f"{group}.md"
+        path.write_text("\n".join(lines))
+        written.append(path)
+    documented = "".join(p.read_text() for p in written)
+    if undocumented := [n for n in sub.choices if f"## `thermoslop {n}`" not in documented]:
+        raise SystemExit(f"gen-cli-docs: no reference section for: {', '.join(undocumented)}")
+    return written
+
+
+if __name__ == "__main__":
+    for path in generate(Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "docs/reference"):
+        print(path)

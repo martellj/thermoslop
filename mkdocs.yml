@@ -1,0 +1,71 @@
+# The ThermoSlop docs site (https://thermoslop.com), built from docs/ by
+# .github/workflows/docs.yml. Plain Markdown, admonitions and this nav only, so
+# the same config builds with Zensical later.
+site_name: ThermoSlop
+site_url: https://thermoslop.com/
+site_description: Local HomeKit control for ecobee thermostats, from the terminal, a status bar or an AI client. Unofficial.
+repo_url: https://github.com/martellj/thermoslop
+repo_name: martellj/thermoslop
+edit_uri: edit/main/docs/
+copyright: >-
+  Unofficial: not affiliated with, endorsed by, or supported by ecobee Inc. or Apple Inc.
+  "ecobee" and "HomeKit" are their trademarks, used only to say what this works with. MIT licensed.
+
+theme:
+  name: material
+  logo: assets/icon.svg
+  favicon: assets/icon.svg
+  font: false            # no Google Fonts: the site makes no third-party requests
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: teal
+      toggle: { icon: material/weather-night, name: Dark mode }
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: teal
+      toggle: { icon: material/weather-sunny, name: Light mode }
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.highlight
+
+hooks:
+  - scripts/docs_hooks.py   # writes the CLI reference from the parser before each build
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc: { permalink: true }
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.details
+  - pymdownx.snippets: { base_path: ["."], check_paths: true }
+
+validation:
+  nav: { omitted_files: warn, not_found: warn, absolute_links: warn }
+  links: { not_found: warn, anchors: warn, unrecognized_links: warn }
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Concepts: concepts.md
+  - Using it:
+      - Omarchy bar widget: omarchy.md
+      - Other status bars: status-bars.md
+      - MCP server for AI clients: mcp.md
+      - macOS: macos.md
+      - Configuration: configuration.md
+  - Troubleshooting:
+      - Networking and discovery: networking.md
+  - CLI reference:
+      - Control and history: reference/control.md
+      - Pairing: reference/pairing.md
+      - Services and integrations: reference/services.md
+      - Troubleshooting commands: reference/troubleshooting.md
+  - Security: security.md
+  - Changelog: changelog.md

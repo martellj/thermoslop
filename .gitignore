@@ -16,3 +16,7 @@ changes.jsonl*
 config.toml
 *.bundle
 dist/
+
+# Docs site: generated CLI reference and the built site
+docs/reference/
+site/

@@ -1,0 +1,14 @@
+# ThermoSlop
+
+> Unofficial local HomeKit control for ecobee thermostats: a CLI (`thermoslop`),
+> an MCP server for AI clients, and status-bar output. Not affiliated with
+> ecobee Inc. or Apple Inc.
+
+## Docs
+
+- [Getting started](https://thermoslop.com/getting-started/): install, setup, discover, pair
+- [MCP server](https://thermoslop.com/mcp/): tools, stdio and tailnet HTTP setup, guardrails
+- [CLI reference: control](https://thermoslop.com/reference/control/): status, set, mode, comfort holds, log
+- [CLI reference: pairing](https://thermoslop.com/reference/pairing/)
+- [Concepts](https://thermoslop.com/concepts/): houses, the watcher, holds, the change log
+- [Networking and discovery](https://thermoslop.com/networking/): when a thermostat isn't found or reachable
