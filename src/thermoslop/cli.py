@@ -461,7 +461,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     def command(name: str, *parents: argparse.ArgumentParser, plain: bool = False) -> argparse.ArgumentParser:
         """`plain`: no --json/-v (help and completion print text and never log)."""
-        return sub.add_parser(name, parents=[*([] if plain else [base]), *parents], **cli_help.command_kwargs(name))
+        # An explicit prog: with a custom top-level usage, Python 3.12 would
+        # otherwise call it "thermoslop COMMAND [options] set".
+        return sub.add_parser(name, prog=f"{APP} {name}", parents=[*([] if plain else [base]), *parents],
+                              **cli_help.command_kwargs(name))
 
     s = command("status", target)
     s.add_argument("--live", action="store_true", help="ask the thermostats even if the watcher's readings are fresh")

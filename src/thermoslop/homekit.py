@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import fcntl
 import json
 import logging
 import os
@@ -251,6 +250,8 @@ async def one_change_at_a_time(alias: str):
     until its result is confirmed (or confirmation gives up), so the next one
     reads a settled value.
     """
+    import fcntl  # POSIX only; imported here so the module still loads on Windows
+
     lock_file = private_dir(STATE_FILE.parent) / f"change-{alias}.lock"
     fd = os.open(lock_file, os.O_RDWR | os.O_CREAT, 0o600)
     try:
