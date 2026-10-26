@@ -79,8 +79,22 @@ def format_states(states: list[dict]) -> str:
     return "\n\n".join(blocks)
 
 
+# Words instead of symbols, for screen readers (--plain or THERMOSLOP_PLAIN=1).
+PLAIN_WORDS = [(" · ", ", "), ("▲ ", ""), ("▼ ", ""), ("—→", "none to "), (" → ", " to "), ("→ ", ""), ("→", " to "),
+               ("°F–", "°F to "), ("°C–", "°C to "), ("°–", "° to "), ("—", "none"), ("…", "...")]
+PLAIN = False
+
+
+def human(text: str) -> str:
+    """Text for people: as is, or with symbols spelled out in plain mode."""
+    if PLAIN:
+        for symbol, words in PLAIN_WORDS:
+            text = text.replace(symbol, words)
+    return text
+
+
 def emit(args, payload, text: str) -> None:
-    print(json.dumps(payload, indent=1) if args.json else text)
+    print(json.dumps(payload, indent=1) if args.json else human(text))
 
 
 # ---- change log --------------------------------------------------------------
@@ -124,7 +138,7 @@ def unconfirmed(states: list[dict]) -> int:
     """Warn about changes the thermostat didn't confirm; the exit code to use (2 or 0)."""
     missed = [s for s in states if s.get("confirmed") is False]
     for s in missed:
-        print(f"{APP}: {s['alias']}: sent, but it still reads: {format_state(s)}", file=sys.stderr)
+        print(human(f"{APP}: {s['alias']}: sent, but it still reads: {format_state(s)}"), file=sys.stderr)
     return 2 if missed else 0
 
 
@@ -217,7 +231,7 @@ def _code_needed(args, device, hint: str = "") -> None:
     if hint:
         print(f"({hint})", file=sys.stderr)
     print(f"Pairing started. Enter the HomeKit code {device.name} shows now", file=sys.stderr)
-    print("(it may have just changed; check the screen, Menu → Settings → HomeKit).", file=sys.stderr)
+    print(human("(it may have just changed; check the screen, Menu → Settings → HomeKit)."), file=sys.stderr)
     # Piped input doesn't echo a newline, so end the prompt line ourselves.
     print("HomeKit code: ", end="" if sys.stdin.isatty() else "\n", file=sys.stderr, flush=True)
 
@@ -417,7 +431,7 @@ async def cmd_setup(args, config) -> int:
     from thermoslop.setup import setup
 
     for line in setup(remove=args.remove, assume_yes=args.yes, plugin=not args.no_plugin):
-        print(f"→ {line}")
+        print(human(f"→ {line}"))
     return 0
 
 
@@ -439,6 +453,8 @@ def build_parser() -> argparse.ArgumentParser:
     base = argparse.ArgumentParser(add_help=False)
     base.add_argument("--json", action="store_true", help="machine-readable output")
     base.add_argument("-v", "--verbose", action="count", default=0, help="more log output (-vv for debug)")
+    base.add_argument("--plain", action="store_true",
+                      help="words instead of symbols (·, →, ▲), e.g. for screen readers; also THERMOSLOP_PLAIN=1")
     target = argparse.ArgumentParser(add_help=False)
     target.add_argument("-t", "--thermostat", metavar="NAME", help="thermostat alias or name (a unique prefix is enough)")
     target.add_argument("--house", help="only thermostats in this house ([houses] in the config)")
@@ -578,6 +594,8 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     if args.command in ("help", "completion"):
         sys.exit(_help_or_completion(parser, args))
+    global PLAIN
+    PLAIN = args.plain or os.environ.get("THERMOSLOP_PLAIN", "") not in ("", "0")
     level = logging.DEBUG if args.verbose > 1 else logging.INFO if args.verbose or args.command == "watch" else logging.WARNING
     logging.basicConfig(level=level, format="%(levelname)s %(name)s: %(message)s")
     migrate_legacy()
@@ -593,7 +611,7 @@ def main(argv: list[str] | None = None) -> None:
         if args.json:
             print(json.dumps({"error": str(e)}))
         else:
-            print(f"{APP}: {e}", file=sys.stderr)
+            print(human(f"{APP}: {e}"), file=sys.stderr)
         code = 1
     except KeyboardInterrupt:
         code = 130

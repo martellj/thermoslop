@@ -169,7 +169,7 @@ def top_description() -> str:
 
 def top_epilog() -> str:
     return "\n".join([
-        "Every command takes --json (machine-readable output) and -v (more logging).",
+        "Every command takes --json (machine-readable output), --plain (no symbols) and -v.",
         "",
         "files:",
         f"  config        {_home(CONFIG_FILE)}",
@@ -179,6 +179,7 @@ def top_epilog() -> str:
         "",
         "environment:",
         "  THERMOSLOP_SOURCE   who a change is logged as (cli, widget, mcp); set by the bar widget",
+        "  THERMOSLOP_PLAIN=1  words instead of symbols in output, like --plain (screen readers)",
         "  XDG_CONFIG_HOME, XDG_DATA_HOME, XDG_CACHE_HOME, XDG_STATE_HOME   move the files above",
         "",
         f"docs: {DOCS_URL}",

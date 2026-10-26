@@ -40,4 +40,5 @@ Files are mode 600 in 700 directories. The `XDG_CONFIG_HOME`,
 
 | Variable | Effect |
 |---|---|
+| `THERMOSLOP_PLAIN=1` | Words instead of symbols in output, like `--plain` (screen readers) |
 | `THERMOSLOP_SOURCE` | Who a change is logged as (`cli`, `widget`, `mcp`); the bar widget sets `widget` |

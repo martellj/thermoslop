@@ -62,6 +62,10 @@ version.
 
 ### Added
 
+- `--plain` (or `THERMOSLOP_PLAIN=1`) prints words instead of symbols
+  (`·`, `→`, `▲`, `—`), so output reads well in a screen reader:
+  `Upstairs: 70.9°F, heating, set 61°F (heat), hold, 58% RH`. `--json` is
+  unchanged.
 - Better built-in help. `thermoslop --help` groups the commands, shows the
   first steps, and says where the config and data files live. Each command's
   help explains what it acts on without `-t`, has examples, and documents
