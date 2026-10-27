@@ -6,8 +6,9 @@ import re
 from pathlib import Path
 
 PLUGIN = Path(__file__).parent.parent / "omarchy/martellj.thermoslop"
-# Styled text is allowed only where it's built from numbers and fixed strings.
-STYLED_ALLOWED = {"deltaText"}
+# Styled text would be allowed only where it's built from numbers and fixed
+# strings; since the target line became words, no Text needs it.
+STYLED_ALLOWED: set[str] = set()
 
 
 def _text_blocks(source: str):

@@ -133,6 +133,22 @@ Panel {
     return null
   }
 
+  // "Room 1.2°F above target", "Room 0.5°F below range", "Room within range".
+  function targetWords(t) {
+    if (!t.available || t.temperature === null || t.temperature === undefined) return ""
+    const u = "°" + (t.units === "C" ? "C" : "F")
+    const off = (d, what) => Math.abs(d) < 0.05 ? "Room at " + what
+      : "Room " + Math.abs(d).toFixed(1) + u + (d > 0 ? " above " : " below ") + what
+    if (t.mode === "heat") return off(t.temperature - (t.target ?? t.heat_setpoint), "target")
+    if (t.mode === "cool") return off(t.temperature - (t.target ?? t.cool_setpoint), "target")
+    if (t.mode === "auto") {
+      if (t.temperature < t.heat_setpoint) return off(t.temperature - t.heat_setpoint, "range")
+      if (t.temperature > t.cool_setpoint) return off(t.temperature - t.cool_setpoint, "range")
+      return "Room within range"
+    }
+    return ""
+  }
+
   function ago(seconds) {
     if (seconds < 60) return Math.max(0, Math.round(seconds)) + "s ago"
     if (seconds < 3600) return Math.round(seconds / 60) + "m ago"
@@ -863,10 +879,10 @@ Panel {
                       readonly property var delta: root.targetDelta(zone.t)
                       anchors.right: parent.right
                       anchors.verticalCenter: parent.verticalCenter
-                      textFormat: Text.StyledText
-                      text: delta === null ? "" : "Target Δ <font color='" + (delta >= 0 ? root.good : root.accent) + "'>"
-                        + (delta >= 0 ? "+" : "") + delta.toFixed(1) + "°" + (zone.t.units === "C" ? "C" : "F") + "</font>"
-                      color: root.dim
+                      // In words, so it doesn't rely on color: green means there's nothing to do.
+                      textFormat: Text.PlainText
+                      text: root.targetWords(zone.t)
+                      color: delta === null ? root.dim : delta >= 0 ? root.good : root.accent
                       font.family: root.font
                       font.pixelSize: Style.font.bodySmall
                     }
