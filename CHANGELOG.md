@@ -8,6 +8,13 @@ version.
 
 ## [Unreleased]
 
+### Security
+
+- `thermoslop bar` treats thermostat names as untrusted: Waybar output
+  escapes Pango markup, and SwiftBar output removes `|` and line breaks from
+  names, so a name can't add a menu action or item. The redesigned panel
+  keeps every label plain text (as in 0.2.3).
+
 ### Fixed
 
 - mDNS no longer runs on loopback and VPN/Tailscale interfaces, where it
