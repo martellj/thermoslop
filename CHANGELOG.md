@@ -8,6 +8,8 @@ version.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-27
+
 ### Security
 
 - `thermoslop bar` treats thermostat names as untrusted: Waybar output
