@@ -79,3 +79,11 @@ def test_release_reminds_about_unreleased_doc_notes(tmp_path):
     assert script["unreleased_notes"](docs) == ["docs/mcp.md:4"]
     (docs / "mcp.md").write_text("# MCP\n")
     assert script["unreleased_notes"](docs) == []
+
+
+def test_every_test_file_is_allowed_in_the_sdist():
+    # check-dist runs only in CI's build job; catch a new test name it rejects here.
+    patterns = [__import__("re").compile(p) for p in script("check-dist")["SDIST_ALLOWED"]]
+    for test in sorted((Path(__file__).parent).glob("*.py")):
+        name = f"tests/{test.name}"
+        assert any(p.fullmatch(name) for p in patterns), f"{name} would fail scripts/check-dist"

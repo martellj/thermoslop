@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 WHEEL_ALLOWED = [r"thermoslop/[a-z_]+\.py", r"thermoslop-[^/]+\.dist-info/.+"]
 SDIST_ALLOWED = [
-    r"src/thermoslop/[a-z_]+\.py", r"src/thermoslop\.egg-info/.+", r"tests/[a-z_]+\.py",
+    r"src/thermoslop/[a-z_]+\.py", r"src/thermoslop\.egg-info/.+", r"tests/[a-z0-9_]+\.py",
     r"(README\.md|LICENSE|CHANGELOG\.md|SECURITY\.md|pyproject\.toml|setup\.cfg|PKG-INFO)",
 ]
 FORBIDDEN = re.compile(r"(^|/)(openspec|\.claude|\.git|scratch|__pycache__)(/|$)|\.bundle$|pairing\.json|changes\.jsonl")
