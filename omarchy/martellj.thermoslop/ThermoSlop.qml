@@ -156,6 +156,14 @@ BarWidget {
     return icon() + " " + temps.join(" │ ") + pending + (cliState === "outdated" ? "  ↑" : "")
   }
 
+  // What a screen reader says for the bar item: names and readings in words.
+  function spoken() {
+    if (cliState === "missing") return "ThermoSlop: the thermoslop command isn't installed"
+    if (!shown.length) return "ThermoSlop: no thermostats"
+    return "ThermoSlop: " + shown.map(t => (t.name || t.alias) + " "
+      + (t.available ? Math.round(t.temperature) + " degrees, " + (t.action || "") : "unavailable")).join("; ")
+  }
+
   // Changes made here are logged with source "widget" (`thermoslop log`).
   readonly property string cli: "THERMOSLOP_SOURCE=widget thermoslop"
 
@@ -228,6 +236,8 @@ BarWidget {
     anchors.fill: parent
     bar: root.bar
     text: root.label()
+    Accessible.name: root.spoken()
+    Accessible.description: "Click for the thermostat panel"
     fontSize: Style.font.caption
     horizontalMargin: 6
     dimmed: root.live.length === 0 || !root.cliOk

@@ -71,6 +71,11 @@ version.
 
 ### Added
 
+- The panel works from the keyboard, the Omarchy way: the first arrow key
+  shows a cursor, arrows (or h/j/k/l) move it over each card's −/+ and mode
+  chips, Enter or Space presses, and + / - adjust the card it's on. Every
+  control has a screen-reader name that says which thermostat it acts on,
+  and the gauge and trend line have text alternatives.
 - `--plain` (or `THERMOSLOP_PLAIN=1`) prints words instead of symbols
   (`·`, `→`, `▲`, `—`), so output reads well in a screen reader:
   `Upstairs: 70.9°F, heating, set 61°F (heat), hold, 58% RH`. `--json` is
