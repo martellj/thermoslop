@@ -12,6 +12,7 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
+import "contrast.js" as Contrast
 
 Panel {
   id: root
@@ -70,13 +71,20 @@ Panel {
   }
 
   readonly property color fg: Color.popups.text
-  readonly property color accent: Color.accent
-  readonly property color cool: "#6cb6d9"
-  readonly property color good: "#5fd38d"
-  readonly property color bad: Color.urgent
-  readonly property color dim: Qt.darker(fg, 1.5)
   readonly property color surface: Util.alpha(fg, 0.035)
   readonly property color hairline: Util.alpha(fg, 0.10)
+  // Text and controls sit on the cards: the popup background with `surface`
+  // over it. Each color below is the theme's own, unless it's hard to read
+  // there; then it's moved toward black or white just enough (contrast.js):
+  // 4.5:1 for text, 3:1 for control outlines (WCAG 1.4.3, 1.4.11).
+  readonly property var card: Contrast.blend(fg, Color.popups.background, 0.035)
+  function readable(c) { const o = Contrast.readable(c, root.card, 4.5); return Qt.rgba(o.r, o.g, o.b, 1) }
+  readonly property color accent: readable(Color.accent)
+  readonly property color cool: readable(Qt.color("#6cb6d9"))
+  readonly property color good: readable(Qt.color("#5fd38d"))
+  readonly property color bad: readable(Color.urgent)
+  readonly property color dim: readable(Qt.darker(fg, 1.5))
+  readonly property color outline: Util.alpha(fg, Contrast.alphaFor(fg, card, 3, 0.18))
   readonly property string font: root.bar ? root.bar.fontFamily : Style.font.family
   readonly property int radius: Style.space(10)
 
@@ -1237,7 +1245,7 @@ Panel {
     radius: Style.space(6)
     color: primary ? Util.alpha(root.accent, buttonMouse.containsMouse && enabled ? 0.26 : 0.16)
       : (buttonMouse.containsMouse && enabled ? Util.alpha(root.fg, 0.08) : "transparent")
-    border.color: hasCursor ? root.accent : primary ? Util.alpha(root.accent, 0.6) : Util.alpha(root.fg, 0.18)
+    border.color: hasCursor || primary ? root.accent : root.outline
     border.width: hasCursor ? 2 : 1
     opacity: enabled ? 1 : 0.4
 
@@ -1275,7 +1283,7 @@ Panel {
     height: width
     radius: Style.space(5)
     color: stepMouse.containsMouse && enabled ? Util.alpha(root.accent, 0.18) : Util.alpha(root.fg, 0.06)
-    border.color: hasCursor ? root.accent : Util.alpha(root.fg, 0.18)
+    border.color: hasCursor ? root.accent : root.outline
     border.width: hasCursor ? 2 : 1
     opacity: enabled ? 1 : 0.35
 
@@ -1314,7 +1322,7 @@ Panel {
     height: Style.space(28)
     radius: Style.space(6)
     color: active ? Util.alpha(activeTint, 0.14) : (chipMouse.containsMouse && enabled ? Util.alpha(root.fg, 0.06) : "transparent")
-    border.color: hasCursor ? root.accent : active ? Util.alpha(activeTint, 0.6) : root.hairline
+    border.color: hasCursor ? root.accent : active ? activeTint : root.outline
     border.width: hasCursor ? 2 : 1
     opacity: enabled || active ? 1 : 0.4
 

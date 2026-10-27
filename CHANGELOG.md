@@ -76,6 +76,11 @@ version.
   chips, Enter or Space presses, and + / - adjust the card it's on. Every
   control has a screen-reader name that says which thermostat it acts on,
   and the gauge and trend line have text alternatives.
+- The panel's colors are readable in every Omarchy theme: dim, accent,
+  green, blue and red text reach 4.5:1 and button outlines 3:1 (WCAG AA).
+  A theme's own color is kept when it passes, and otherwise moved just
+  enough. Before, outlines failed in all 22 themes, accent text in 5 and the
+  cooling blue on light themes.
 - `--plain` (or `THERMOSLOP_PLAIN=1`) prints words instead of symbols
   (`·`, `→`, `▲`, `—`), so output reads well in a screen reader:
   `Upstairs: 70.9°F, heating, set 61°F (heat), hold, 58% RH`. `--json` is
