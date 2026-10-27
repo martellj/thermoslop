@@ -510,7 +510,7 @@ Panel {
                       : "watcher offline · run: thermoslop setup"
                     color: root.dim
                     font.family: root.font
-                    font.pixelSize: Style.font.bodySmall
+                    font.pixelSize: Style.font.body
                   }
                 }
               }
@@ -567,7 +567,7 @@ Panel {
                 text: "Then restart the shell: omarchy restart shell"
                 color: root.dim
                 font.family: root.font
-                font.pixelSize: Style.font.bodySmall
+                font.pixelSize: Style.font.body
               }
             }
           }
@@ -787,7 +787,7 @@ Panel {
                           text: zone.c ? zone.c.note : ""
                           color: zone.c && zone.c.phase === "unknown" ? root.bad : root.dim
                           font.family: root.font
-                          font.pixelSize: Style.font.caption
+                          font.pixelSize: Style.font.body
                         }
                       }
                     }
@@ -884,7 +884,7 @@ Panel {
                       text: root.targetWords(zone.t)
                       color: delta === null ? root.dim : delta >= 0 ? root.good : root.accent
                       font.family: root.font
-                      font.pixelSize: Style.font.bodySmall
+                      font.pixelSize: Style.font.body
                     }
                   }
                 }
@@ -972,8 +972,15 @@ Panel {
                   color: root.accent
                   font.family: root.font
                   font.pixelSize: Style.font.iconLarge
+                  Accessible.ignored: true  // the text beside it says what's happening
+                  // Spins for 5 s per step, then rests (no endless motion).
+                  property bool settled: false
+                  readonly property string stage: root.pairStage
+                  onStageChanged: { settled = false; rotation = 0; settle.restart() }
+                  onVisibleChanged: { settled = false; rotation = 0; if (visible) settle.restart() }
+                  Timer { id: settle; interval: 5000; onTriggered: { spinner.settled = true; spinner.rotation = 0 } }
                   RotationAnimation on rotation {
-                    running: spinner.visible
+                    running: spinner.visible && !spinner.settled
                     from: 0; to: 360; duration: 1200; loops: Animation.Infinite
                   }
                 }
@@ -991,11 +998,19 @@ Panel {
                   }
                   Text {
                     textFormat: Text.PlainText
+                    visible: spinner.settled
+                    text: "Still working…"
+                    color: root.dim
+                    font.family: root.font
+                    font.pixelSize: Style.font.body
+                  }
+                  Text {
+                    textFormat: Text.PlainText
                     visible: root.pairStage === "starting"
                     text: "It shows a fresh code once pairing starts."
                     color: root.dim
                     font.family: root.font
-                    font.pixelSize: Style.font.bodySmall
+                    font.pixelSize: Style.font.body
                   }
                 }
               }
@@ -1038,7 +1053,7 @@ Panel {
                         text: [deviceRow.modelData.model, deviceRow.modelData.address].filter(x => x).join(" · ") || "paired as " + deviceRow.modelData.alias
                         color: root.dim
                         font.family: root.font
-                        font.pixelSize: Style.font.caption
+                        font.pixelSize: Style.font.body
                       }
                     }
 
@@ -1071,7 +1086,7 @@ Panel {
                   text: "Nothing is ready to pair. A thermostat pairs with one HomeKit controller: remove it from Apple Home, or reset HomeKit on it (Menu → Settings → HomeKit)."
                   color: root.dim
                   font.family: root.font
-                  font.pixelSize: Style.font.bodySmall
+                  font.pixelSize: Style.font.body
                 }
 
                 TextButton {
@@ -1101,7 +1116,7 @@ Panel {
                   text: "On the thermostat: Menu → Settings → HomeKit. It changes when pairing starts, so use the one on screen now."
                   color: root.dim
                   font.family: root.font
-                  font.pixelSize: Style.font.bodySmall
+                  font.pixelSize: Style.font.body
                 }
                 Text {
                   textFormat: Text.PlainText
@@ -1109,7 +1124,7 @@ Panel {
                   text: root.pairHint
                   color: root.cool
                   font.family: root.font
-                  font.pixelSize: Style.font.bodySmall
+                  font.pixelSize: Style.font.body
                 }
                 Row {
                   spacing: Style.space(8)
@@ -1152,7 +1167,7 @@ Panel {
                     : "It appears in the bar once the watcher picks it up (a few seconds)."
                   color: root.dim
                   font.family: root.font
-                  font.pixelSize: Style.font.bodySmall
+                  font.pixelSize: Style.font.body
                 }
                 TextButton {
                   text: "DONE"
@@ -1468,7 +1483,7 @@ Panel {
       text: "collecting…"
       color: spark.emptyColor
       font.family: spark.fontFamily
-      font.pixelSize: Style.font.caption
+      font.pixelSize: Style.font.body
     }
 
     Canvas {

@@ -83,6 +83,10 @@ version.
   cooling blue on light themes.
 - The panel's "Target Δ +1.2°F" line now says it in words ("Room 1.2°F
   above target", "Room within range"), so it doesn't depend on its color.
+- Informational text in the panel (status, notes, pairing hints, device
+  details) is at body size; captions are only used for headings and button
+  labels. The pairing spinner rests after 5 seconds and says "Still
+  working…".
 - `--plain` (or `THERMOSLOP_PLAIN=1`) prints words instead of symbols
   (`·`, `→`, `▲`, `—`), so output reads well in a screen reader:
   `Upstairs: 70.9°F, heating, set 61°F (heat), hold, 58% RH`. `--json` is
