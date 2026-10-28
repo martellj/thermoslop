@@ -39,7 +39,7 @@ copies it everywhere else.
    ```
    The marketplace bot checks the exact commit, and a maintainer approves it.
 
-6. **Update the AUR package** once the release is on PyPI:
+6. **Update the AUR package** once the release is on PyPI (skip this until the package has been published to the AUR):
    ```bash
    scripts/aur-pkgbuild 0.3.0 --check   # writes packaging/aur/PKGBUILD and .SRCINFO
    (cd packaging/aur && makepkg -sf)    # optional: build it here
