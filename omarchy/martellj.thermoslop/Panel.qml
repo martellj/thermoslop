@@ -13,6 +13,7 @@ import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "contrast.js" as Contrast
+import "house.js" as House
 
 Panel {
   id: root
@@ -193,7 +194,8 @@ Panel {
     root.armed = ""
     disarm.stop()
     if (root.hostWidget && root.hostWidget.demo) return
-    run(root.cli + " " + action + " --all" + (house ? " --house " + Util.shellQuote(house) : ""))
+    // Exactly the thermostats the confirmation counted (house.js).
+    run(House.command(root.cli, action, house, root.houseZones(house).map(t => t.alias), Util.shellQuote))
   }
 
   // ---- keyboard: one cursor over the cards, Omarchy-style (PanelKeyCatcher).

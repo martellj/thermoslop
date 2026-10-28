@@ -8,6 +8,13 @@ version.
 
 ## [Unreleased]
 
+### Fixed
+
+- In the panel, AWAY ALL and RESUME ALL for thermostats with no house (the
+  OTHER group) ran `--all`, which also reached thermostats in the named
+  houses. They now act on just the thermostats the confirmation counts, one
+  `-t` at a time. Reported in the Omarchy marketplace review.
+
 ## [0.3.0] - 2026-10-27
 
 ### Security
