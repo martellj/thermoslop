@@ -47,7 +47,7 @@ def test_a_compiled_wheel_cant_be_vendored(monkeypatch):
         GEN["plan"](REPORT)
 
 
-@pytest.mark.skipif(sys.platform == "win32" or not shutil.which("bash"), reason="needs bash (not WSL's)")
+@pytest.mark.skipif(sys.platform != "linux", reason="PKGBUILDs are read by Arch's bash; macOS ships bash 3.2")
 def test_pkgbuild_is_valid_bash_with_matching_sources_and_sums(tmp_path):
     depends, vendored = GEN["plan"](REPORT + [dist("chacha20poly1305", "0.0.3", file="chacha20poly1305-0.0.3.tar.gz")])
     text = GEN["pkgbuild"]("1.0.0", "cd" * 32, depends, vendored)
