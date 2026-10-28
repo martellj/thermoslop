@@ -1,0 +1,253 @@
+#!/usr/bin/env python3
+"""Write packaging/aur/PKGBUILD for a release on PyPI.
+
+  scripts/aur-pkgbuild 0.3.0            resolve, write the PKGBUILD and .SRCINFO
+  scripts/aur-pkgbuild 0.3.0 --check    also check Arch's versions fit (network)
+
+Dependencies Arch packages (everything compiled, and most of the rest) become
+`depends=`, so Arch rebuilds them when Python moves. The few it doesn't
+(mcp 2.x, aiohomekit and helpers) are pure Python: their wheels are
+checksummed `source=` entries unpacked into /usr/lib/thermoslop, so nothing is
+downloaded in package(). A dependency in neither table stops the script; add
+it to one of them.
+"""
+
+import json
+import re
+import subprocess
+import sys
+import tempfile
+import urllib.request
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+OUT = ROOT / "packaging" / "aur" / "PKGBUILD"
+MAINTAINER = "John Martell <602586+martellj@users.noreply.github.com>"
+
+# PyPI name (normalised) -> Arch package.
+ARCH = {
+    "aiohappyeyeballs": "python-aiohappyeyeballs",
+    "annotated-types": "python-annotated-types",
+    "anyio": "python-anyio",
+    "async-interrupt": "python-async_interrupt",
+    "attrs": "python-attrs",
+    "bleak": "python-bleak",
+    "cffi": "python-cffi",
+    "chacha20poly1305-reuseable": "python-chacha20poly1305-reuseable",
+    "click": "python-click",
+    "cryptography": "python-cryptography",
+    "dbus-fast": "python-dbus-fast",
+    "h11": "python-h11",
+    "httpcore2": "python-httpcore2",
+    "httpx2": "python-httpx2",
+    "idna": "python-idna",
+    "ifaddr": "python-ifaddr",
+    "jsonschema": "python-jsonschema",
+    "jsonschema-specifications": "python-jsonschema-specifications",
+    "opentelemetry-api": "python-opentelemetry-api",
+    "orjson": "python-orjson",
+    "pycparser": "python-pycparser",
+    "pydantic": "python-pydantic",
+    "pydantic-core": "python-pydantic-core",
+    "pyjwt": "python-pyjwt",
+    "python-multipart": "python-python-multipart",
+    "referencing": "python-referencing",
+    "rpds-py": "python-rpds-py",
+    "sse-starlette": "python-sse-starlette",
+    "starlette": "python-starlette",
+    "truststore": "python-truststore",
+    "typing-extensions": "python-typing_extensions",
+    "typing-inspection": "python-typing-inspection",
+    "uvicorn": "uvicorn",
+    "zeroconf": "python-zeroconf",
+}
+
+# Not in Arch (or, for mcp, only 1.x): bundled. Must be pure Python.
+VENDORED = {
+    "aiocoap", "aiohomekit", "aiooui", "bleak-retry-connector", "bluetooth-adapters",
+    "chacha20poly1305", "mcp", "mcp-types", "uart-devices", "usb-devices",
+}
+
+
+def norm(name: str) -> str:
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+
+def resolve(version: str) -> list[dict]:
+    """pip's install report for thermoslop==version on this machine's Python."""
+    with tempfile.TemporaryDirectory() as tmp:
+        subprocess.run([sys.executable, "-m", "venv", tmp], check=True)
+        out = subprocess.run(
+            [f"{tmp}/bin/pip", "install", "--quiet", "--disable-pip-version-check", "--dry-run",
+             "--ignore-installed", "--report", "-", f"thermoslop=={version}"],
+            check=True, capture_output=True, text=True).stdout
+    return json.loads(out)["install"]
+
+
+def pypi_sdist(name: str, version: str) -> tuple[str, str]:
+    with urllib.request.urlopen(f"https://pypi.org/pypi/{name}/{version}/json") as r:
+        files = json.load(r)["urls"]
+    sdist = next(f for f in files if f["packagetype"] == "sdist")
+    return sdist["url"], sdist["digests"]["sha256"]
+
+
+def ours(report: list[dict]) -> list[dict]:
+    """thermoslop and what we bundle. Arch's own packages are consistent with each
+    other at Arch's versions, so only these packages' requirements on them count."""
+    return [i for i in report if norm(i["metadata"]["name"]) in VENDORED | {"thermoslop"}]
+
+
+def direct(report: list[dict]) -> dict[str, str]:
+    """Everything we require directly -> the highest `>=` bound on it ("" if none).
+    Arch's packages bring their own dependencies, so depends= lists only these."""
+    from packaging.requirements import Requirement
+    from packaging.version import Version
+    bounds: dict[str, str] = {}
+    for item in ours(report):
+        for spec in item["metadata"].get("requires_dist", []):
+            req = Requirement(spec)
+            if req.marker and not req.marker.evaluate({"extra": ""}):
+                continue
+            name = norm(req.name)
+            bounds.setdefault(name, "")
+            for s in req.specifier:
+                if s.operator == ">=" and (not bounds[name] or Version(s.version) > Version(bounds[name])):
+                    bounds[name] = s.version
+    return bounds
+
+
+def plan(report: list[dict]) -> tuple[list[str], list[tuple[str, str, str]]]:
+    """(depends, [(file name, url, sha256)] to vendor) from an install report."""
+    bounds = direct(report)
+    depends, vendored, unknown = ["python"], [], []
+    for item in sorted(report, key=lambda i: norm(i["metadata"]["name"])):
+        name = norm(item["metadata"]["name"])
+        if name == "thermoslop":
+            continue
+        if name in ARCH:
+            if name in bounds:
+                depends.append(ARCH[name] + (f">={bounds[name]}" if bounds[name] else ""))
+        elif name in VENDORED:
+            url = item["download_info"]["url"]
+            file = url.rsplit("/", 1)[1]
+            if file.endswith(".whl") and not file.endswith("-none-any.whl"):
+                sys.exit(f"{file} isn't pure Python; it can't be vendored into an arch=any package")
+            vendored.append((file, url, item["download_info"]["archive_info"]["hashes"]["sha256"]))
+        else:
+            unknown.append(name)
+    if unknown:
+        sys.exit(f"Not in ARCH or VENDORED: {', '.join(unknown)}. Check `pacman -Si python-<name>` and add it.")
+    return depends, vendored
+
+
+def check_arch(report: list[dict]) -> list[str]:
+    """Problems with the versions Arch currently ships, against every requirement on them."""
+    from packaging.requirements import Requirement
+    from packaging.version import InvalidVersion, Version
+    problems = []
+    needed: dict[str, list] = {}
+    for item in ours(report):
+        for spec in item["metadata"].get("requires_dist", []):
+            req = Requirement(spec)
+            if norm(req.name) in ARCH and (not req.marker or req.marker.evaluate({"extra": ""})):
+                needed.setdefault(norm(req.name), []).append((item["metadata"]["name"], req.specifier))
+    for name, pkg in sorted(ARCH.items()):
+        if name not in needed:
+            continue
+        with urllib.request.urlopen(f"https://archlinux.org/packages/search/json/?name={pkg}") as r:
+            results = [x for x in json.load(r)["results"] if x["repo"] in ("core", "extra")]
+        if not results:
+            problems.append(f"{pkg}: not in Arch's core or extra")
+            continue
+        try:
+            have = Version(results[0]["pkgver"])
+        except InvalidVersion:
+            problems.append(f"{pkg}: can't read Arch's version {results[0]['pkgver']!r}")
+            continue
+        for who, spec in needed[name]:
+            if not spec.contains(have, prereleases=True):
+                problems.append(f"{pkg} {have}: {who} needs {name}{spec}")
+    return problems
+
+
+def pkgbuild(version: str, sdist_sha256: str, depends: list[str],
+             vendored: list[tuple[str, str, str]]) -> str:
+    wheels = [f for f, _, _ in vendored if f.endswith(".whl")]
+    sdists = [f.removesuffix(".tar.gz") for f, _, _ in vendored if f.endswith(".tar.gz")]
+    q = lambda xs, indent, quote="'": f"\n{indent}".join(f"{quote}{x}{quote}" for x in xs)
+    # The stable /source/ URL, so a version bump needs only new checksums.
+    sources = ["https://files.pythonhosted.org/packages/source/t/thermoslop/thermoslop-$pkgver.tar.gz"]
+    sources += [u for _, u, _ in vendored]
+    # One command per line: makepkg's errexit doesn't stop on a failed `cd` inside `&&`.
+    build_sdists = "".join(f'  cd "$srcdir/{d}"\n  python -m build --wheel --no-isolation --outdir "$srcdir/wheels"\n'
+                           for d in sdists)
+    return f"""\
+# Maintainer: {MAINTAINER}
+# Generated by scripts/aur-pkgbuild in github.com/martellj/thermoslop; regenerate
+# rather than edit. Arch's packages cover the compiled dependencies; the pure-Python
+# ones Arch lacks (mcp 2.x, aiohomekit and helpers) are bundled in /usr/lib/thermoslop.
+pkgname=thermoslop
+pkgver={version}
+pkgrel=1
+pkgdesc="Unofficial local HomeKit control for ecobee thermostats: CLI, watcher, MCP server"
+arch=('any')
+url="https://github.com/martellj/thermoslop"
+license=('MIT')
+depends=({q(depends, "         ")})
+makedepends=('python-build' 'python-setuptools' 'python-wheel')
+source=({q(sources, "        ", '"')})
+noextract=({q(wheels, "          ")})
+sha256sums=({q([sdist_sha256] + [h for _, _, h in vendored], "            ")})
+
+build() {{
+  cd "$srcdir/thermoslop-$pkgver"
+  python -m build --wheel --no-isolation --outdir "$srcdir/wheels"
+{build_sdists}}}
+
+package() {{
+  local lib="$pkgdir/usr/lib/thermoslop" whl
+  install -d "$lib"
+  # All pure Python with no data files, so unpacking a wheel is installing it.
+  for whl in "$srcdir"/wheels/*.whl "$srcdir"/*.whl; do
+    python -m zipfile -e "$whl" "$lib"
+  done
+  python -m compileall -q -d /usr/lib/thermoslop "$lib"
+  # -I: ignore PYTHONPATH and user site-packages, so the bundled mcp 2.x wins over any other.
+  install -Dm755 /dev/stdin "$pkgdir/usr/bin/thermoslop" <<'LAUNCHER'
+#!/usr/bin/python3 -I
+import sys
+sys.path.insert(0, "/usr/lib/thermoslop")
+from thermoslop.cli import main
+sys.exit(main())
+LAUNCHER
+  install -Dm644 "$srcdir/thermoslop-$pkgver/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}}
+"""
+
+
+def main() -> None:
+    args = [a for a in sys.argv[1:] if not a.startswith("-")]
+    if len(args) != 1 or not re.fullmatch(r"\d+\.\d+\.\d+", args[0]):
+        sys.exit(__doc__)
+    version = args[0]
+    report = resolve(version)
+    depends, vendored = plan(report)
+    if "--check" in sys.argv:
+        problems = check_arch(report)
+        if problems:
+            sys.exit("Arch's packages don't fit:\n  " + "\n  ".join(problems))
+        print("Arch's packages fit every requirement.")
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    OUT.write_text(pkgbuild(version, pypi_sdist("thermoslop", version)[1], depends, vendored))
+    print(f"Wrote {OUT.relative_to(ROOT)}: {len(depends) - 1} Arch dependencies, {len(vendored)} bundled.")
+    # The AUR needs .SRCINFO next to the PKGBUILD; only makepkg can write it.
+    srcinfo = subprocess.run(["makepkg", "--printsrcinfo"], cwd=OUT.parent, capture_output=True, text=True)
+    if srcinfo.returncode == 0:
+        (OUT.parent / ".SRCINFO").write_text(srcinfo.stdout)
+        print(f"Wrote {(OUT.parent / '.SRCINFO').relative_to(ROOT)}.")
+    else:
+        print("makepkg isn't available: run `makepkg --printsrcinfo > .SRCINFO` on Arch before publishing.")
+
+
+if __name__ == "__main__":
+    main()

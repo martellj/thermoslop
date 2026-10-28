@@ -39,6 +39,21 @@ copies it everywhere else.
    ```
    The marketplace bot checks the exact commit, and a maintainer approves it.
 
+6. **Update the AUR package** once the release is on PyPI:
+   ```bash
+   scripts/aur-pkgbuild 0.3.0 --check   # writes packaging/aur/PKGBUILD and .SRCINFO
+   (cd packaging/aur && makepkg -sf)    # optional: build it here
+   git add packaging/aur && git commit -m "AUR: thermoslop 0.3.0" && git push
+   cp packaging/aur/{PKGBUILD,.SRCINFO} ~/aur/thermoslop/
+   cd ~/aur/thermoslop && git commit -am "Update to 0.3.0" && git push
+   ```
+   The package uses Arch's own builds of every dependency Arch has, and bundles
+   only the pure-Python ones it lacks (mcp 2.x, aiohomekit and helpers).
+   `--check` fails if a version Arch ships is too old for us; then wait for
+   Arch, or pin the bundled package that needs it. A new dependency stops the
+   script until it's added to `ARCH` or `VENDORED` in `scripts/aur-pkgbuild`.
+   To ship only a PKGBUILD fix, raise `pkgrel` by hand in both files.
+
 To check a release without publishing, run the Release workflow by hand
 (Actions → Release → Run workflow). Everything up to the smoke tests runs;
 the publish jobs only run for tags.
@@ -94,6 +109,10 @@ new version instead:
   `martellj/thermoslop`, workflow `release.yml`, environment `pypi`. A pending
   publisher does **not** reserve the name, so check that the name is still
   free right before the first release.
+- **AUR:** an account at aur.archlinux.org with your SSH public key, then
+  `git clone ssh://aur@aur.archlinux.org/thermoslop.git ~/aur/thermoslop`
+  (an empty clone; the first push of `PKGBUILD` and `.SRCINFO` creates the
+  package).
 - **GitHub:**
   - the `pypi` environment, with the owner as required reviewer
   - a ruleset so only the owner can create `v*` tags

@@ -20,3 +20,8 @@ dist/
 # Docs site: generated CLI reference and the built site
 docs/reference/
 site/
+
+# makepkg's downloads and build output; only the PKGBUILD and .SRCINFO are kept
+packaging/aur/*
+!packaging/aur/PKGBUILD
+!packaging/aur/.SRCINFO
