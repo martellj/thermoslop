@@ -8,6 +8,8 @@ version.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-28
+
 ### Fixed
 
 - In the panel, AWAY ALL and RESUME ALL for thermostats with no house (the
